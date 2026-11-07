@@ -27,10 +27,10 @@ Buka **Command Prompt** atau **PowerShell**, lalu jalankan:
 
 ```bat
 cd C:\
-git clone https://github.com/<organisasi>/bisaclip-w.git BisaClip
+git clone https://github.com/Moover-Studio/bisaclip-w.git BisaClip
 ```
 
-Ganti `<organisasi>` dengan alamat repository tim. Folder bebas, asalkan ada di drive **C:**. Jangan di drive jaringan atau di dalam OneDrive.
+Folder bebas, asalkan ada di drive **C:**. Jangan di drive jaringan atau di dalam OneDrive.
 
 ### 2. (Opsional) Siapkan file library tim
 
