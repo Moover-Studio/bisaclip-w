@@ -1,0 +1,10 @@
+# Repo ini di-clone di Windows. Skrip yang dijalankan di Ubuntu (WSL) wajib berakhir baris LF,
+# file Windows (.bat, .ps1) wajib CRLF, apa pun setelan core.autocrlf di laptop.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.ttf binary
+*.onnx binary
