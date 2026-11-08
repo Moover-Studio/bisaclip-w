@@ -1,0 +1,7 @@
+# Batas PHP untuk upload footage & proses panjang (XAMPP for Windows / Mac, Apache + mod_php)
+<IfModule php_module>
+    php_value upload_max_filesize 4G
+    php_value post_max_size 4G
+    php_value memory_limit 1024M
+    php_value max_execution_time 0
+</IfModule>

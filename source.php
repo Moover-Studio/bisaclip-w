@@ -99,8 +99,8 @@ function make_source_parts(string $analysisId, array $ranges, ?array $src = null
     $parts = [];
     foreach ($merged as [$a, $b]) {
         // Keyframe terakhir sebelum awal rentang: potongan tanpa encode ulang harus dimulai di keyframe
-        $kfs = (string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -skip_frame nokey -show_entries frame=pts_time -of csv=p=0'
-            . ' -read_intervals ' . escapeshellarg(sprintf('%.3f%%%.3f', max(0, $a - 30), $a + 0.05)) . ' ' . escapeshellarg($src['path']));
+        $kfs = (string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -skip_frame nokey -show_entries frame=pts_time -of csv=p=0'
+            . ' -read_intervals ' . sh_arg(sprintf('%.3f%%%.3f', max(0, $a - 30), $a + 0.05)) . ' ' . sh_arg($src['path']));
         // Baris ffprobe bisa diakhiri koma ("495.916667,"), jadi ambil angkanya saja
         $kf = null;
         preg_match_all('/\d+(?:\.\d+)?/', $kfs, $mm);
@@ -113,9 +113,9 @@ function make_source_parts(string $analysisId, array $ranges, ?array $src = null
         $file = sprintf('p_%d.mp4', round($kf * 1000));
         // Ditulis ke file sementara dulu: sumber yang dipotong bisa berupa potongan lama dengan nama yang sama
         $out = "$dir/$file.new";
-        exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . sprintf('%.3f', $kf + 0.001) . ' -i ' . escapeshellarg($src['path'])
-            . ' -t ' . sprintf('%.3f', $b - $kf) . " -map 0:v:0 -map '0:a:0?' -c copy -avoid_negative_ts make_zero -movflags +faststart -f mp4 " . escapeshellarg($out), $o, $code);
-        $dur = (float) shell_exec(escapeshellarg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . escapeshellarg($out));
+        sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . sprintf('%.3f', $kf + 0.001) . ' -i ' . sh_arg($src['path'])
+            . ' -t ' . sprintf('%.3f', $b - $kf) . " -map 0:v:0 -map '0:a:0?' -c copy -avoid_negative_ts make_zero -movflags +faststart -f mp4 " . sh_arg($out), $o, $code);
+        $dur = (float) sh_out(sh_arg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . sh_arg($out));
         if ($code !== 0 || !is_file($out) || $dur < min($b - $kf, $total - $kf) - 1) {
             throw new RuntimeException('Gagal menyimpan potongan video sumber.');
         }
@@ -217,15 +217,15 @@ function run_source_download(string $id, array $job, string $tmpDir, string $can
         }
         update_job($id, ['status' => 'downloading', 'stage' => 'Mengunduh video sumber…', 'progress' => 0]);
         $downloader = $how === 'aria2'
-            ? ' --downloader aria2c --downloader-args ' . escapeshellarg('aria2c:-x 8 -s 8 -k 2M --summary-interval=1 --console-log-level=warn')
+            ? ' --downloader aria2c --downloader-args ' . sh_arg('aria2c:-x 8 -s 8 -k 2M --summary-interval=1 --console-log-level=warn')
             : ' --http-chunk-size 10M --retries 5';
         $part = 0;
         $lastWrite = 0;
-        [$code, $tail] = run(escapeshellarg(YTDLP) . ' --no-playlist --newline --no-warnings --no-mtime --concurrent-fragments 4'
-            . ' -f ' . escapeshellarg('bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b')
+        [$code, $tail] = run(sh_arg(YTDLP) . ' --no-playlist --newline --no-warnings --no-mtime --concurrent-fragments 4'
+            . ' -f ' . sh_arg('bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b')
             . ' --merge-output-format mp4' . $downloader
-            . ' --progress-template ' . escapeshellarg('download:[prog]%(progress._percent_str)s')
-            . ' -o ' . escapeshellarg("$tmpDir/source.%(ext)s") . ' -- ' . escapeshellarg($job['url']),
+            . ' --progress-template ' . sh_arg('download:[prog]%(progress._percent_str)s')
+            . ' -o ' . sh_arg("$tmpDir/source.%(ext)s") . ' -- ' . sh_arg($job['url']),
             function (string $line) use ($id, &$part, &$lastWrite) {
                 if (str_contains($line, '[download] Destination:')) {
                     $part++;

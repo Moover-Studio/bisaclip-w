@@ -110,8 +110,8 @@ function frame_mask(array $edit): ?string
         $y1 = $y0 + $h - 1;
         $d = "hypot(max(0,max($r-X,X-(1079-$r))),max(0,max($y0+$r-Y,Y-($y1-$r))))";
         $a = $r > 0 ? "if(between(Y,$y0,$y1),clip(($d-$r+0.5)*255,0,255),255)" : "if(between(Y,$y0,$y1),0,255)";
-        shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -loglevel error -y -f lavfi -i color=c=black:s=1080x1920:d=1 -frames:v 1 -vf '
-            . escapeshellarg("format=rgba,geq=r=0:g=0:b=0:a='$a'") . ' ' . escapeshellarg($file));
+        sh_out(sh_arg(FFMPEG) . ' -hide_banner -loglevel error -y -f lavfi -i color=c=black:s=1080x1920:d=1 -frames:v 1 -vf '
+            . sh_arg("format=rgba,geq=r=0:g=0:b=0:a='$a'") . ' ' . sh_arg($file));
         @chmod($file, 0666);
     }
     return is_file($file) ? $file : null;
@@ -396,23 +396,23 @@ function make_proxy_parallel(array $v, ?array $a, float $start, float $dur, stri
         $amap = $ai !== null ? "-map $ai:a:0 -c:a aac -b:a 128k" : '-an';
         // Bagian terakhir dibiarkan sampai akhir rentang supaya tidak ada sisa karena pembulatan
         $t = $k === $n - 1 ? $dur - $k * $len : $len;
-        $script .= escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
+        $script .= sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
             . ' -t ' . number_format($t, 3, '.', '') . " -map $vi:v:0 -vf scale=-2:" . PROXY_H . " -pix_fmt yuv420p $amap"
-            . " $enc " . escapeshellarg($part) . " &\n";
+            . " $enc " . sh_arg($part) . " &\n";
         $list .= "file '" . str_replace("'", "'\\''", $part) . "'\n";
     }
     $script .= "wait\n";
     file_put_contents("$tmpDir/proxy.sh", $script);
     file_put_contents("$tmpDir/proxy_list.txt", $list);
-    run('/bin/sh ' . escapeshellarg("$tmpDir/proxy.sh"), fn() => null, $cancelFlag, 300);
+    run('/bin/sh ' . sh_arg("$tmpDir/proxy.sh"), fn() => null, $cancelFlag, 300);
     clearstatcache();
     for ($k = 0; $k < $n; $k++) {
         if (!is_file("$tmpDir/proxy_$k.mp4") || filesize("$tmpDir/proxy_$k.mp4") === 0) {
             return false;
         }
     }
-    [$code] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -f concat -safe 0 -i '
-        . escapeshellarg("$tmpDir/proxy_list.txt") . ' -c copy -movflags +faststart ' . escapeshellarg($out),
+    [$code] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -f concat -safe 0 -i '
+        . sh_arg("$tmpDir/proxy_list.txt") . ' -c copy -movflags +faststart ' . sh_arg($out),
         fn() => null, $cancelFlag, 120);
     clearstatcache();
     return $code === 0 && is_file($out) && filesize($out) > 0;
@@ -461,7 +461,7 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
     }
     $padDur = $padEnd - $padStart;
     // Persiapan clip yang tidak sedang dibuka di editor berjalan dengan prioritas CPU rendah
-    $nice = empty($job['priority']) ? 'nice -n 15 ' : '';
+    $nice = empty($job['priority']) && !IS_WIN ? 'nice -n 15 ' : ''; // Windows: tanpa nice (proses .exe)
 
     // Pakai video sumber lokal kalau ada (tunggu kalau masih diunduh); kalau tidak ada, ambil lewat link
     $local = !empty($job['analysis_id']) ? wait_local_source($job['analysis_id'], $jobId, $cancelFlag, $padStart, $padEnd) : null;
@@ -487,9 +487,9 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
         update_job($jobId, ['stage' => 'Menyiapkan editor: membuat video preview…', 'progress' => 0]);
         [$inputs] = clip_inputs(local_format($local), null, $padStart);
         foreach (venc_list(PROXY_ENC) as $enc) {
-            [$code] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
+            [$code] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
                 . ' -t ' . number_format($padDur, 3, '.', '') . " -map 0:v:0 -map '0:a:0?' -vf scale=-2:" . PROXY_H . " -pix_fmt yuv420p"
-                . " -c:a aac -b:a 128k $enc -movflags +faststart " . escapeshellarg($proxy), fn() => null, $cancelFlag, 300);
+                . " -c:a aac -b:a 128k $enc -movflags +faststart " . sh_arg($proxy), fn() => null, $cancelFlag, 300);
             clearstatcache();
             if ($ok = $code === 0 && is_file($proxy) && filesize($proxy) > 0) {
                 break;
@@ -503,9 +503,9 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
             sleep(2);
         }
         $raw = '';
-        run(escapeshellarg(YTDLP) . ' -j --no-playlist --no-warnings'
-            . ' -f ' . escapeshellarg('bv*[height<=' . PROXY_H . '][protocol=https]+ba[protocol=https]/b[height<=' . PROXY_H . ']/bv*[height<=' . PROXY_H . ']+ba')
-            . ' -S ' . escapeshellarg('res,fps') . ' --socket-timeout 20 -- ' . escapeshellarg($job['url']),
+        run(sh_arg(YTDLP) . ' -j --no-playlist --no-warnings'
+            . ' -f ' . sh_arg('bv*[height<=' . PROXY_H . '][protocol=https]+ba[protocol=https]/b[height<=' . PROXY_H . ']/bv*[height<=' . PROXY_H . ']+ba')
+            . ' -S ' . sh_arg('res,fps') . ' --socket-timeout 20 -- ' . sh_arg($job['url']),
             function ($line) use (&$raw) {
                 if ($line !== '' && $line[0] === '{') {
                     $raw = $line;
@@ -557,8 +557,8 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
     $words = [];
     $wav = "$tmpDir/audio.wav";
     update_job($jobId, ['stage' => 'Menyiapkan editor: transkrip subtitle (Whisper)…', 'progress' => 0]);
-    run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($proxy)
-        . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le ' . escapeshellarg($wav), fn() => null, $cancelFlag, 120);
+    run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($proxy)
+        . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le ' . sh_arg($wav), fn() => null, $cancelFlag, 120);
     if (is_file($wav)) {
         try {
             $words = whisper_words($wav, (string) ($job['language'] ?? ''), $tmpDir, $cancelFlag, $nice);
@@ -577,11 +577,11 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
     $pp = probe($proxy);
     $ph = $pp['width'] ? (int) (round(640 * $pp['height'] / $pp['width'] / 2) * 2) : 360;
     $trackOut = "$tmpDir/track.json";
-    run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . escapeshellarg($proxy)
-        . " -an -vf fps=10,scale=$pw:$ph -f rawvideo -pix_fmt bgr24 - | $nice" . escapeshellarg(PYTHON) . ' '
-        . escapeshellarg(APP_DIR . '/tools/speaker_track.py') . " --width $pw --height $ph --fps 10"
-        . ' --model ' . escapeshellarg(FACE_MODEL) . ' --words ' . escapeshellarg("$tmpDir/words_clip.json")
-        . ' --out ' . escapeshellarg($trackOut), fn() => null, $cancelFlag, 300);
+    run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . sh_arg($proxy)
+        . " -an -vf fps=10,scale=$pw:$ph -f rawvideo -pix_fmt bgr24 - | $nice" . sh_arg(PYTHON) . ' '
+        . sh_arg(APP_DIR . '/tools/speaker_track.py') . " --width $pw --height $ph --fps 10"
+        . ' --model ' . sh_arg(FACE_MODEL) . ' --words ' . sh_arg("$tmpDir/words_clip.json")
+        . ' --out ' . sh_arg($trackOut), fn() => null, $cancelFlag, 300);
     $track = json_decode((string) @file_get_contents($trackOut), true);
     [$segments, $shots, $cam] = track_to_edit($track, $padStart, precise_cuts($proxy));
     return merge_prepared($pid, $iid, ['segments' => $segments, 'shots' => $shots, 'cam' => $cam, 'precise' => TRACK_VERSION], false);
@@ -594,7 +594,7 @@ function prepare_edit(string $jobId, array $job, string $cancelFlag): array
  */
 function precise_cuts(string $proxy): array
 {
-    $out = (string) shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -i ' . escapeshellarg($proxy)
+    $out = (string) sh_out(sh_arg(FFMPEG) . ' -hide_banner -nostdin -i ' . sh_arg($proxy)
         . " -an -vf \"scale=160:-2,select='gt(scene,0.1)',metadata=print:file=-\" -f null - 2>/dev/null");
     preg_match_all('/pts_time:([\d.]+)/', $out, $m);
     return array_map('floatval', $m[1]);
@@ -640,7 +640,7 @@ function track_to_edit(?array $track, float $padStart, array $cuts = []): array
 /** Tinggi video proxy (px), 0 kalau tidak terbaca. */
 function proxy_height(string $file): int
 {
-    $s = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=height -of json ' . escapeshellarg($file)), true);
+    $s = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=height -of json ' . sh_arg($file)), true);
     return (int) ($s['streams'][0]['height'] ?? 0);
 }
 
@@ -666,13 +666,13 @@ function upgrade_proxy(array $project, string $iid): bool
     }
     $tmp = "$proxy.hd.mp4";
     // Sama dengan clip_inputs() untuk sumber lokal (dipanggil dari API, clip.php tidak dimuat): posisi relatif ke awal potongan
-    $inputs = ' -ss ' . number_format(max(0, $p0 - (float) $local['shift']), 3, '.', '') . ' -i ' . escapeshellarg($local['path']);
+    $inputs = ' -ss ' . number_format(max(0, $p0 - (float) $local['shift']), 3, '.', '') . ' -i ' . sh_arg($local['path']);
     $ok = false;
     foreach (venc_list(PROXY_ENC) as $enc) {
         @unlink($tmp);
-        [$code] = run_with_timeout(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
+        [$code] = run_with_timeout(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
             . ' -t ' . number_format($p1 - $p0, 3, '.', '') . " -map 0:v:0 -map '0:a:0?' -vf scale=-2:" . PROXY_H . ' -pix_fmt yuv420p'
-            . " -c:a aac -b:a 128k $enc -movflags +faststart " . escapeshellarg($tmp), 300);
+            . " -c:a aac -b:a 128k $enc -movflags +faststart " . sh_arg($tmp), 300);
         clearstatcache();
         if ($ok = $code === 0 && is_file($tmp) && filesize($tmp) > 0) {
             break;
@@ -710,14 +710,14 @@ function retrack_edit(string $pid, string $iid): array
         }
     }
     file_put_contents("$tmp/words.json", json_encode($words));
-    $pp = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height -of json '
-        . escapeshellarg($proxy)), true)['streams'][0] ?? ['width' => 854, 'height' => 480];
+    $pp = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height -of json '
+        . sh_arg($proxy)), true)['streams'][0] ?? ['width' => 854, 'height' => 480];
     $h = (int) (round(640 * $pp['height'] / $pp['width'] / 2) * 2);
-    [$code] = run_with_timeout(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . escapeshellarg($proxy)
-        . " -an -vf fps=10,scale=640:$h -f rawvideo -pix_fmt bgr24 - | " . escapeshellarg(PYTHON) . ' '
-        . escapeshellarg(APP_DIR . '/tools/speaker_track.py') . " --width 640 --height $h --fps 10"
-        . ' --model ' . escapeshellarg(FACE_MODEL) . ' --words ' . escapeshellarg("$tmp/words.json")
-        . ' --out ' . escapeshellarg("$tmp/track.json"), 120);
+    [$code] = run_with_timeout(sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . sh_arg($proxy)
+        . " -an -vf fps=10,scale=640:$h -f rawvideo -pix_fmt bgr24 - | " . sh_arg(PYTHON) . ' '
+        . sh_arg(APP_DIR . '/tools/speaker_track.py') . " --width 640 --height $h --fps 10"
+        . ' --model ' . sh_arg(FACE_MODEL) . ' --words ' . sh_arg("$tmp/words.json")
+        . ' --out ' . sh_arg("$tmp/track.json"), 120);
     $track = json_decode((string) @file_get_contents("$tmp/track.json"), true);
     rrmdir($tmp);
     if (!is_array($track)) {
@@ -1522,7 +1522,7 @@ function music_library_put(string $file, string $name, float $dur, string $from)
 function music_library_import(string $path, string $name): void
 {
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-    $dur = (float) trim((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . escapeshellarg($path)));
+    $dur = (float) trim((string) sh_out(sh_arg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . sh_arg($path)));
     if (!in_array($ext, ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac'], true) || $dur < 1) {
         return;
     }
@@ -1578,7 +1578,7 @@ function sfx_library(): array
     if (!is_file($manifest)) {
         @mkdir(SFX_DIR, 0777, true);
         @chmod(SFX_DIR, 0777);
-        exec(escapeshellarg(PYTHON) . ' ' . escapeshellarg(APP_DIR . '/tools/sfx_gen.py') . ' --out ' . escapeshellarg(SFX_DIR) . ' 2>&1');
+        sh_exec(sh_arg(PYTHON) . ' ' . sh_arg(APP_DIR . '/tools/sfx_gen.py') . ' --out ' . sh_arg(SFX_DIR) . ' 2>&1');
     }
     $built = (array) json_decode((string) @file_get_contents($manifest), true);
     // Detik puncak tiap SFX bawaan dihitung sekali lalu disimpan di manifest
@@ -1603,7 +1603,7 @@ function elevenlabs_key(): string
  */
 function audio_peak(string $path): float
 {
-    $pcm = (string) shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . escapeshellarg($path)
+    $pcm = (string) sh_out(sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . sh_arg($path)
         . ' -ac 1 -ar 8000 -f s16le - 2>/dev/null');
     $s = $pcm !== '' ? array_values(unpack('s*', $pcm)) : [];
     $win = 320;
@@ -1661,7 +1661,7 @@ function sfx_generate_ai(string $text, ?float $dur, string $name, string $tag = 
     $file = sha1((string) $res) . '.mp3';
     file_put_contents(SFX_DIR . "/$file", $res);
     @chmod(SFX_DIR . "/$file", 0666);
-    $len = (float) trim((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . escapeshellarg(SFX_DIR . "/$file")));
+    $len = (float) trim((string) sh_out(sh_arg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . sh_arg(SFX_DIR . "/$file")));
     $user = json_decode((string) @file_get_contents(STORAGE_DIR . '/sfx.json'), true) ?: [];
     $user[] = ['file' => $file, 'name' => mb_substr($name, 0, 80), 'dur' => round($len, 3), 'ai' => true, 'prompt' => mb_substr($text, 0, 300),
         'peak' => audio_peak(SFX_DIR . "/$file")] + ($tag !== '' ? ['tag' => $tag] : []);
@@ -1939,7 +1939,7 @@ function overlay_graph(array $edit, string $in, string $out, bool $withMedia = t
         $w = (int) round(1080 * $ov['size']);
         $m = OVERLAY_MARGIN;
         $y = match ($ov['pos']) { 'top' => "$m", 'center' => '(H-h)/2', default => "H-h-$m" } . sprintf('%+d', (int) $ov['offset']);
-        $parts[] = 'movie=' . OVERLAY_DIR . '/' . $ov['file'] . ",scale=$w:-1,format=rgba[ovimg]";
+        $parts[] = 'movie=' . ff_path(OVERLAY_DIR . '/' . $ov['file']) . ",scale=$w:-1,format=rgba[ovimg]";
         $parts[] = "[$cur][ovimg]overlay=x=(W-w)/2:y=$y:format=auto[ov0]";
         $cur = 'ov0';
     }
@@ -2042,7 +2042,7 @@ function media_graph(array $edit, string $in, string $out, float $k = 1.0): stri
         $op = (int) ($m['opacity'] ?? 100);
         $alpha = $op < 100 ? sprintf(',colorchannelmixer=aa=%.3f', max(0, $op) / 100) : '';
         if ($din <= 0 && $dout <= 0) {
-            $parts[] = 'movie=' . OVERLAY_DIR . '/' . $m['file'] . ",scale=$w:-1,format=rgba{$alpha}[mimg$i]";
+            $parts[] = 'movie=' . ff_path(OVERLAY_DIR . '/' . $m['file']) . ",scale=$w:-1,format=rgba{$alpha}[mimg$i]";
             $parts[] = sprintf("[$cur][mimg$i]overlay=x=%d-w/2:y=%d-h/2:enable='between(t,%.3f,%.3f)':format=auto[med$i]", $X, $Y, $s, $e);
         } else {
             // Animasi: gambar dijadikan stream (loop) supaya alpha (fade), skala, dan posisi bisa berubah per frame
@@ -2051,7 +2051,7 @@ function media_graph(array $edit, string $in, string $out, float $k = 1.0): stri
             [$dxi, $dyi, $sci] = $din > 0 ? anim_expr($anim['in'], 'in', $p) : ['0', '0', '1'];
             [$dxo, $dyo, $sco] = $dout > 0 ? anim_expr($anim['out'], 'out', $q) : ['0', '0', '1'];
             $scaled = $sci !== '1' || $sco !== '1';
-            $chain = 'movie=' . OVERLAY_DIR . '/' . $m['file'] . ',scale=' . ($scaled ? (int) round($w * 1.12 / 2) * 2 : $w) . ':-1,format=rgba' . $alpha . ',loop=loop=-1:size=1,setpts=N/30/TB'
+            $chain = 'movie=' . ff_path(OVERLAY_DIR . '/' . $m['file']) . ',scale=' . ($scaled ? (int) round($w * 1.12 / 2) * 2 : $w) . ':-1,format=rgba' . $alpha . ',loop=loop=-1:size=1,setpts=N/30/TB'
                 . sprintf(',trim=end=%.3f', $dur + 0.5);
             if ($din > 0) {
                 $pop = $anim['in'] === 'pop';
@@ -2105,7 +2105,7 @@ function layers_chain(array $edit, string $in, string $out, array $ass, float $k
                 $cur = "lm$n";
             }
         } elseif (!empty($ass[$layer])) {
-            $parts[] = "[$cur]ass=filename={$ass[$layer]}:fontsdir=" . SUB_FONTS_DIR . "[la$n]";
+            $parts[] = "[$cur]ass=filename=" . ff_path($ass[$layer]) . ":fontsdir=" . ff_path(SUB_FONTS_DIR) . "[la$n]";
             $cur = "la$n";
         }
     }

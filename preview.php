@@ -31,9 +31,9 @@ function preview_streams(string $id, string $url, bool $refresh = false): array
         if (!$refresh && is_array($data) && ($data['expire'] ?? 0) > time() + 600) {
             return $data;
         }
-        $cmd = escapeshellarg(YTDLP) . ' -j --no-playlist --no-warnings'
-            . ' -f ' . escapeshellarg('bv*[height<=480][protocol=https]+ba[protocol=https]/b[height<=480][protocol=https]/bv*[height<=480]+ba/b')
-            . ' -S ' . escapeshellarg('hdr:SDR,res,fps') . ' --socket-timeout 20 -- ' . escapeshellarg($url);
+        $cmd = sh_arg(YTDLP) . ' -j --no-playlist --no-warnings'
+            . ' -f ' . sh_arg('bv*[height<=480][protocol=https]+ba[protocol=https]/b[height<=480][protocol=https]/bv*[height<=480]+ba/b')
+            . ' -S ' . sh_arg('hdr:SDR,res,fps') . ' --socket-timeout 20 -- ' . sh_arg($url);
         [, $raw] = run_with_timeout($cmd, 60);
         $info = null;
         foreach (explode("\n", $raw) as $line) {
@@ -78,8 +78,8 @@ function ff_input(array $stream, float $t): string
     foreach ($stream['headers'] as $k => $v) {
         $headers .= "$k: $v\r\n";
     }
-    return ' -ss ' . number_format($t, 2, '.', '') . ($headers ? ' -headers ' . escapeshellarg($headers) : '')
-        . ' -rw_timeout 20000000 -i ' . escapeshellarg($stream['url']);
+    return ' -ss ' . number_format($t, 2, '.', '') . ($headers ? ' -headers ' . sh_arg($headers) : '')
+        . ' -rw_timeout 20000000 -i ' . sh_arg($stream['url']);
 }
 
 /** Jalankan perintah ffmpeg yang memakai URL stream; kalau gagal (URL kedaluwarsa/403), ambil URL baru sekali. */
@@ -88,7 +88,7 @@ function with_streams(string $id, string $url, string $out, callable $build): bo
     foreach ([false, true] as $refresh) {
         $streams = preview_streams($id, $url, $refresh);
         foreach ($build($streams) as $cmd) {
-            exec($cmd . ' ' . escapeshellarg($out) . ' 2>&1', $o, $code);
+            sh_exec($cmd . ' ' . sh_arg($out) . ' 2>&1', $o, $code);
             clearstatcache();
             if ($code === 0 && is_file($out) && filesize($out) > 0) {
                 @chmod($out, 0666);
@@ -109,8 +109,8 @@ function make_frame(string $id, string $url, float $t): string
     $tmp = $out . '.' . getmypid() . '.jpg';
     // Video sumber lokal sudah ada: ambil frame langsung (±0,1 detik)
     if ($src = local_source($id, $t, $t + 0.1)) {
-        exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format($t - $src['shift'], 2, '.', '')
-            . ' -i ' . escapeshellarg($src['path']) . ' -frames:v 1 -vf scale=480:-2 -q:v 4 ' . escapeshellarg($tmp), $o, $code);
+        sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format($t - $src['shift'], 2, '.', '')
+            . ' -i ' . sh_arg($src['path']) . ' -frames:v 1 -vf scale=480:-2 -q:v 4 ' . sh_arg($tmp), $o, $code);
         if ($code === 0 && is_file($tmp)) {
             @chmod($tmp, 0666);
             rename($tmp, $out);
@@ -118,7 +118,7 @@ function make_frame(string $id, string $url, float $t): string
         }
     }
     $ok = with_streams($id, $url, $tmp, fn($s) => [
-        escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . ff_input($s['video'], $t)
+        sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . ff_input($s['video'], $t)
         . ' -frames:v 1 -vf scale=480:-2 -q:v 4',
     ]);
     if (!$ok) {
@@ -139,9 +139,9 @@ function make_preview_video(string $id, string $url, float $s, float $e): string
     $tmp = $out . '.' . getmypid() . '.mp4';
     if ($src = local_source($id, $s, $e)) {
         foreach (venc_list(['-c:v h264_videotoolbox -b:v 1500k', '-c:v libx264 -preset veryfast -crf 26']) as $enc) {
-            exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format($s - $src['shift'], 2, '.', '')
-                . ' -i ' . escapeshellarg($src['path']) . " -t $dur -map 0:v:0 -map '0:a:0?' -vf scale=-2:480 -pix_fmt yuv420p"
-                . " -c:a aac -b:a 128k $enc -movflags +faststart " . escapeshellarg($tmp), $o, $code);
+            sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format($s - $src['shift'], 2, '.', '')
+                . ' -i ' . sh_arg($src['path']) . " -t $dur -map 0:v:0 -map '0:a:0?' -vf scale=-2:480 -pix_fmt yuv420p"
+                . " -c:a aac -b:a 128k $enc -movflags +faststart " . sh_arg($tmp), $o, $code);
             if ($code === 0 && is_file($tmp) && filesize($tmp) > 0) {
                 @chmod($tmp, 0666);
                 rename($tmp, $out);
@@ -158,7 +158,7 @@ function make_preview_video(string $id, string $url, float $s, float $e): string
         } else {
             $map .= " -map '0:a:0?'";
         }
-        $base = escapeshellarg(FFMPEG) . " -hide_banner -nostdin -y -loglevel error$in -t $dur $map"
+        $base = sh_arg(FFMPEG) . " -hide_banner -nostdin -y -loglevel error$in -t $dur $map"
             . ' -vf scale=-2:480 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart';
         return array_map(fn($e) => "$base $e", venc_list(['-c:v h264_videotoolbox -b:v 1500k', '-c:v libx264 -preset veryfast -crf 26']));
     });

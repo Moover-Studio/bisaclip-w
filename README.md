@@ -2,7 +2,7 @@
 
 Ubah video panjang jadi clip vertikal siap upload (TikTok, Reels, Shorts). AI mencari momen terbaik, memotong, membuat subtitle, judul, hook dan caption, lalu kamu tinggal merapikannya di editor. Semua berjalan di laptop sendiri.
 
-Ini versi **Windows 10/11** dari BisaClip. Aplikasinya berjalan di **WSL2** (Linux bawaan Windows), tapi tetap dibuka di browser Windows biasa: `http://localhost/bisaclip/`. Semua langkah teknis dikerjakan otomatis oleh installer.
+Ini versi **Windows 10/11** dari BisaClip, berjalan di **XAMPP for Windows**. Semua tool (ffmpeg, yt-dlp, whisper, Python) dipasang otomatis oleh installer ke dalam folder aplikasi.
 
 ---
 
@@ -12,92 +12,74 @@ Ini versi **Windows 10/11** dari BisaClip. Aplikasinya berjalan di **WSL2** (Lin
 |---|---|
 | Windows | Windows 10 (22H2) atau Windows 11, 64-bit |
 | RAM | Minimal 8 GB, disarankan 16 GB |
-| Ruang disk | ±25 GB kosong di drive C: |
-| GPU | Opsional. GPU **NVIDIA** membuat render & transkrip jauh lebih cepat dan mengaktifkan AI upscale 2K. Perbarui dulu **driver NVIDIA di Windows** (Game Ready / Studio). |
-| Git | [Git for Windows](https://git-scm.com/download/win), dengan pilihan bawaan saat instalasi |
+| Ruang disk | ±15 GB kosong |
+| XAMPP | [XAMPP for Windows](https://www.apachefriends.org/download.html) (PHP 8.2 ke atas), dipasang di `C:\xampp` |
+| Git | Git for Windows. Pasang lewat terminal: `winget install --id Git.Git -e --source winget`. Git Bash dipakai BisaClip untuk menjalankan ffmpeg dan Python. |
+| GPU | Opsional. GPU **NVIDIA** membuat transkrip lebih cepat dan mengaktifkan AI upscale 2K. Perbarui driver NVIDIA dulu. |
 | Internet | Untuk instalasi, unduh video, dan layanan AI |
 
 ---
 
-## Instalasi (sekali per laptop, ±20–40 menit)
+## Instalasi (sekali per laptop)
 
-### 1. Clone repository
+### 1. Pasang XAMPP dan Git
 
-Buka **Command Prompt** atau **PowerShell**, lalu jalankan:
+1. Unduh dan pasang **XAMPP for Windows** di `C:\xampp` (pilihan bawaan sudah cukup).
+2. Buka PowerShell, lalu pasang Git dengan `winget install --id Git.Git -e --source winget`.
+3. Tutup lalu buka lagi PowerShell, supaya perintah `git` dikenali.
 
-```bat
-cd C:\
-git clone https://github.com/Moover-Studio/bisaclip-w.git BisaClip
+### 2. Clone ke folder htdocs
+
+```powershell
+cd C:\xampp\htdocs
+git clone https://github.com/Moover-Studio/bisaclip-w.git
 ```
 
-Folder bebas, asalkan ada di drive **C:**. Jangan di drive jaringan atau di dalam OneDrive.
+Folder harus berada di dalam `C:\xampp\htdocs`, supaya aplikasinya bisa dibuka di `http://localhost/bisaclip-w/`.
 
-### 2. (Opsional) Siapkan file library tim
+### 3. (Opsional) File library tim
 
-Kalau admin memberikan file **`bisaclip-library.tar.gz`**, taruh di folder `C:\BisaClip` atau di **Downloads**. File ini berisi musik, SFX, preset, dan API key Gemini bawaan tim.
+Kalau admin memberikan **`bisaclip-library.tar.gz`**, taruh di folder **Downloads**. File ini berisi musik, SFX, preset, dan API key Gemini bawaan tim.
 
-Tanpa file ini, BisaClip tetap jalan, tetapi:
-- musik, SFX, dan preset mulai kosong;
-- API key Gemini harus diisi sendiri di **Pengaturan → API key**. Key gratis bisa dibuat di [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Tanpa file ini, musik, SFX, dan preset mulai kosong, dan API key Gemini diisi sendiri di **Pengaturan → API key**. Key gratis bisa dibuat di [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-### 3. Jalankan installer
+### 4. Jalankan installer
 
-Buka folder `C:\BisaClip`, lalu klik dua kali **Install BisaClip.bat**.
+Buka `C:\xampp\htdocs\bisaclip-w`, lalu klik dua kali **Install BisaClip.bat**.
 
 - *"Windows protected your PC"*: klik **More info** → **Run anyway**.
-- Jendela izin Administrator: klik **Yes**.
-- Diminta **restart**: restart laptop, lalu klik dua kali **Install BisaClip.bat** lagi. Installer melanjutkan dari bagian yang belum selesai.
-
-Tunggu sampai muncul **"Selesai!"**. Di akhir ada cek sistem, dan semua baris wajib harus ✓.
+- Tunggu sampai muncul **"Selesai!"** (pertama kali 15–30 menit). Di akhir ada cek sistem, dan semua baris wajib harus ✓.
 
 Yang dipasang otomatis:
-- WSL2 + Ubuntu 24.04.
-- Apache + PHP.
-- ffmpeg.
-- yt-dlp + deno.
-- whisper.cpp (versi GPU kalau ada NVIDIA).
-- Python + OpenCV, plus PyTorch untuk AI upscale kalau ada NVIDIA.
-- Model AI.
-- Library tim (kalau ada).
-- Dua ikon di Desktop.
+- **Ke dalam `storage\bin`:** ffmpeg, yt-dlp, deno, dan whisper.
+- **Python 3.12 + OpenCV:** dipasang ke `storage\venv`, plus PyTorch kalau ada NVIDIA.
+- **Model AI, font Arial Black, dan library tim** (kalau file library ada).
+- **Ikon di Desktop:** **BisaClip** dan **Hasil BisaClip**.
 
-Untuk sengaja melewati CUDA, jalankan dari Command Prompt di folder BisaClip: `"Install BisaClip.bat" -NoCuda`.
+### 5. Nyalakan Apache
+
+Buka **XAMPP Control Panel**, lalu klik **Start** di baris **Apache**. Setelah itu klik dua kali ikon **BisaClip** di Desktop, yang membuka `http://localhost/bisaclip-w/`.
 
 ---
 
 ## Memakai sehari-hari
 
-- Klik dua kali ikon **BisaClip** di Desktop. Browser terbuka ke `http://localhost/bisaclip/`.
-- **Biarkan jendela hitamnya terbuka** (boleh di-minimize) selama memakai BisaClip. Menutupnya akan mematikan BisaClip.
-- Video hasil bisa diunduh dari aplikasi, atau dibuka lewat ikon **Hasil BisaClip** di Desktop. Folder ini hanya bisa dibuka saat BisaClip menyala.
-- Kompresi clip otomatis **H.264**, supaya bisa diputar dan diedit di Windows. Pengaturannya ada di **Pengaturan → Kompresi**.
+1. Buka **XAMPP Control Panel**, lalu **Start** Apache.
+2. Klik ikon **BisaClip** di Desktop.
+3. Video hasil render ada di ikon **Hasil BisaClip**, yaitu folder `downloads`.
 
-Panduan pemakaian lengkap ada di dalam aplikasi: tombol **"Baru pakai BisaClip?"** di Beranda.
+Kompresi clip otomatis **H.264** supaya bisa diputar dan diedit di Windows. Pengaturannya ada di **Pengaturan → Kompresi**.
 
 ---
 
 ## Update ke versi terbaru
 
-```bat
-cd C:\BisaClip
+```powershell
+cd C:\xampp\htdocs\bisaclip-w
 git pull
 ```
 
-Lalu klik dua kali **Install BisaClip.bat** lagi. Hanya kode yang diganti. Yang tidak disentuh: preset, musik, SFX, API key, room, project, dan hasil render. Pengaturan juga dicadangkan dulu ke `/root/BisaClip-backup/` di Ubuntu.
-
-> Aplikasi yang berjalan ada di dalam Ubuntu (`/var/www/bisaclip`), bukan di `C:\BisaClip`. Folder clone hanya sumber kode, jadi perubahan baru aktif setelah installer dijalankan lagi.
-
----
-
-## Kualitas dibanding versi Mac
-
-| Bagian | Mac | Windows |
-|---|---|---|
-| Encode video | Apple VideoToolbox | NVIDIA NVENC kualitas tertinggi. Tanpa NVIDIA: x264/x265, kualitas sama, lebih lambat |
-| AI upscale 2K | Apple super-resolution | Real-ESRGAN (GPU NVIDIA). Tanpa NVIDIA: scaling biasa |
-| Subtitle & font | ffmpeg + libass | Sama |
-| Transkrip | whisper.cpp | Sama (CUDA atau CPU) |
-| Deteksi wajah & split screen | OpenCV YuNet | Sama, model yang sama persis |
+Lalu klik dua kali **Install BisaClip.bat** lagi. Installer memasang kebutuhan baru kalau ada dan memperbarui yt-dlp. Data tidak disentuh, termasuk preset, musik, project, API key, dan hasil render, karena semuanya ada di `storage`, `previews`, dan `downloads`, yang tidak dilacak git.
 
 ---
 
@@ -105,21 +87,22 @@ Lalu klik dua kali **Install BisaClip.bat** lagi. Hanya kode yang diganti. Yang 
 
 | Masalah | Solusi |
 |---|---|
-| "Ubuntu tidak bisa dijalankan" / error `0x80370102` | Virtualisasi mati. Cek **Task Manager → Performance → CPU → Virtualization**. Kalau *Disabled*, aktifkan di BIOS (Intel VT-x / AMD SVM), lalu restart. |
-| Installer berhenti di tengah | Jalankan **Install BisaClip.bat** lagi. Bagian yang sudah selesai dilewati. |
-| `localhost/bisaclip` tidak bisa dibuka | Tutup jendela BisaClip, jalankan `wsl --shutdown` di PowerShell, lalu klik ikon BisaClip lagi. |
-| "Akses hanya dari laptop ini" | Buka lewat `http://localhost/bisaclip/`, bukan alamat IP. |
-| Render lambat / cek sistem menulis "encoder software" | GPU NVIDIA tidak terbaca. Perbarui driver NVIDIA di Windows, jalankan `wsl --shutdown`, lalu jalankan installer lagi. |
-| Download YouTube mulai gagal | Jalankan installer lagi (yt-dlp ikut diperbarui). |
-| Drive C: cepat penuh | Buka **Pengaturan → Manajemen storage**, lalu hapus video sumber dan render lama. |
-| Pasang library tim setelah instalasi | Taruh `bisaclip-library.tar.gz` di Downloads, lalu jalankan **Install BisaClip.bat** lagi. |
-| Cek komponen | PowerShell: `wsl -d Ubuntu-24.04 -u root -- sudo -u www-data php /var/www/bisaclip/install/doctor.php` |
+| `localhost/bisaclip-w` tidak terbuka | Apache belum jalan. Buka XAMPP Control Panel, lalu **Start** Apache. Kalau port 80 bentrok (Skype/IIS), matikan aplikasi itu. |
+| Proses gagal dengan pesan "bash" / "Git" | Git for Windows belum terpasang. Pasang Git, lalu jalankan installer lagi. |
+| Download YouTube mulai gagal | Jalankan **Install BisaClip.bat** lagi (yt-dlp diperbarui). |
+| Render lambat / cek sistem menulis "encoder software" | Normal tanpa GPU NVIDIA. Kalau punya NVIDIA, perbarui drivernya lalu jalankan installer lagi. |
+| Cek komponen | PowerShell: `C:\xampp\php\php.exe C:\xampp\htdocs\bisaclip-w\install\doctor.php` |
+| Lihat log proses | `storage\worker.log` |
 
-**Jangan pernah menempel API key** di issue, screenshot, atau chat. File `bisaclip-library.tar.gz` juga berisi key tim, jadi jangan dibagikan ke luar tim dan jangan di-commit (sudah di-ignore oleh `.gitignore`).
+**Jangan pernah menempel API key** di issue, screenshot, atau chat. File `bisaclip-library.tar.gz` berisi key tim: jangan dibagikan ke luar tim dan jangan di-commit.
 
 ---
 
 ## Untuk admin
 
-- **Sumber kode:** repo ini disalin dari BisaClip (Mac). Fitur baru dikembangkan di repo Mac, lalu disalin ke sini.
-- **File library:** dibuat di BisaClip Mac dengan `bash install/export-library.sh`. Tambahkan `--with-models` kalau ingin model AI (±550 MB) ikut dibawa, supaya laptop tidak perlu mengunduhnya. Bagikan file itu lewat Google Drive atau flashdisk, **bukan** lewat git.
+- **Pengembangan:** dilakukan di BisaClip Mac, lalu kodenya disalin ke repo ini.
+- **Pemanggilan perintah:** semua perintah memakai `sh_arg()`, `sh_out()`, dan `sh_exec()` di `config.php`.
+  - Di Mac/Linux, ketiganya sama persis dengan `escapeshellarg()`, `shell_exec()`, dan `exec()`.
+  - Di Windows, perintah dijalankan lewat Git Bash.
+- **Path file di filter ffmpeg:** bungkus dengan `ff_path()`, karena `C:` harus di-escape.
+- **File library:** dibuat di BisaClip Mac dengan `bash install/export-library.sh`. Bagikan lewat Google Drive atau flashdisk, bukan lewat git.

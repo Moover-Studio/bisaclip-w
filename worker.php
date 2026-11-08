@@ -31,6 +31,9 @@ class Cancelled extends Exception {}
 function run(string $cmd, callable $onLine, string $cancelFlag, int $timeout = 0): array
 {
     $deadline = $timeout > 0 ? microtime(true) + $timeout : INF;
+    if (IS_WIN) {
+        return run_win($cmd, $onLine, $cancelFlag, $timeout, $deadline);
+    }
     $proc = proc_open('exec ' . $cmd . ' 2>&1', [1 => ['pipe', 'w']], $pipes);
     if (!is_resource($proc)) {
         return [1, ['Gagal menjalankan proses']];
@@ -42,13 +45,13 @@ function run(string $cmd, callable $onLine, string $cancelFlag, int $timeout = 0
 
     while (true) {
         if (file_exists($cancelFlag)) {
-            proc_terminate($proc, 15);
+            proc_kill($proc, 15);
             fclose($out);
             proc_close($proc);
             throw new Cancelled();
         }
         if (microtime(true) > $deadline) {
-            proc_terminate($proc, 9);
+            proc_kill($proc, 9);
             fclose($out);
             proc_close($proc);
             throw new RuntimeException("Waktu habis ($timeout detik). Periksa koneksi internet lalu coba lagi.");
@@ -90,6 +93,38 @@ function run(string $cmd, callable $onLine, string $cancelFlag, int $timeout = 0
     return [$code, $tail];
 }
 
+/** run() untuk Windows asli: output dibaca lewat file (lihat win_run di config.php). */
+function run_win(string $cmd, callable $onLine, string $cancelFlag, int $timeout, float $deadline): array
+{
+    $tail = [];
+    $buffer = '';
+    $emit = function (string $line) use ($onLine, &$tail) {
+        if ($line === '') {
+            return;
+        }
+        $onLine($line);
+        $tail[] = $line;
+        if (count($tail) > 30) {
+            array_shift($tail);
+        }
+    };
+    [$code, $stopped] = win_run($cmd, function ($chunk) use (&$buffer, $emit) {
+        $buffer .= $chunk;
+        // yt-dlp/ffmpeg kadang memakai \r untuk update progress
+        $lines = preg_split('/\r\n|\r|\n/', $buffer);
+        $buffer = array_pop($lines);
+        array_walk($lines, fn($l) => $emit($l));
+    }, fn() => file_exists($cancelFlag) ? 'cancel' : (microtime(true) > $deadline ? 'timeout' : null), true);
+    if ($stopped === 'cancel') {
+        throw new Cancelled();
+    }
+    if ($stopped === 'timeout') {
+        throw new RuntimeException("Waktu habis ($timeout detik). Periksa koneksi internet lalu coba lagi.");
+    }
+    $emit($buffer);
+    return [$code, $tail];
+}
+
 function error_from(array $tail): string
 {
     foreach (array_reverse($tail) as $line) {
@@ -102,9 +137,9 @@ function error_from(array $tail): string
 
 function probe(string $file): array
 {
-    $cmd = escapeshellarg(FFPROBE) . ' -v error -print_format json -show_streams -show_format '
-        . escapeshellarg($file);
-    $data = json_decode((string) shell_exec($cmd), true) ?: [];
+    $cmd = sh_arg(FFPROBE) . ' -v error -print_format json -show_streams -show_format '
+        . sh_arg($file);
+    $data = json_decode((string) sh_out($cmd), true) ?: [];
     $info = ['vcodec' => null, 'acodec' => null, 'width' => 0, 'height' => 0, 'fps' => 0,
         'duration' => (float) ($data['format']['duration'] ?? 0), 'hdr' => false];
     foreach ($data['streams'] ?? [] as $s) {
@@ -144,9 +179,9 @@ function merge_parts(string $dir): ?string
     if (!$video || !$audio) {
         return null;
     }
-    $ff = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error';
+    $ff = sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error';
     $fixed = "$dir/vfix.mp4";
-    exec("$ff -fflags +genpts -i " . escapeshellarg($video) . ' -map 0:v:0 -c copy ' . escapeshellarg($fixed) . ' 2>&1', $o, $code);
+    sh_exec("$ff -fflags +genpts -i " . sh_arg($video) . ' -map 0:v:0 -c copy ' . sh_arg($fixed) . ' 2>&1', $o, $code);
     if ($code !== 0) {
         @unlink($fixed);
         $fixed = $video;
@@ -154,7 +189,7 @@ function merge_parts(string $dir): ?string
     // MKV menerima semua codec (VP9/AV1/Opus); MP4 sebagai cadangan
     foreach (['mkv', 'mp4'] as $ext) {
         $out = "$dir/source.$ext";
-        exec("$ff -i " . escapeshellarg($fixed) . ' -i ' . escapeshellarg($audio) . ' -map 0:v:0 -map 1:a:0 -c copy ' . escapeshellarg($out) . ' 2>&1', $o, $code);
+        sh_exec("$ff -i " . sh_arg($fixed) . ' -i ' . sh_arg($audio) . ' -map 0:v:0 -map 1:a:0 -c copy ' . sh_arg($out) . ' 2>&1', $o, $code);
         if ($code === 0 && filesize($out) > 0) {
             foreach (glob($dir . '/*') as $f) {
                 if ($f !== $out) {
@@ -402,26 +437,26 @@ try {
 
     // ---------- 1. Unduh ----------
     $args = [
-        escapeshellarg(YTDLP),
+        sh_arg(YTDLP),
         '--no-playlist', '--newline', '--no-warnings', '--no-mtime',
         '--concurrent-fragments', '4',
         // Unduh per potongan 10 MB + coba ulang: YouTube lebih jarang menolak (403) permintaan kecil
         '--http-chunk-size', '10M', '--retries', '5', '--fragment-retries', '5',
-        '--progress-template', escapeshellarg('download:[prog]%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s'),
-        '-o', escapeshellarg($tmpDir . '/source.%(ext)s'),
+        '--progress-template', sh_arg('download:[prog]%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s'),
+        '-o', sh_arg($tmpDir . '/source.%(ext)s'),
     ];
     if ($isAudio) {
-        $args[] = '-f ' . escapeshellarg('ba/b');
+        $args[] = '-f ' . sh_arg('ba/b');
     } else {
         $limit = $height > 0 ? ":$height" : '';
         // Mode edit: utamakan SDR (HDR jadi pucat setelah dikonversi ke 8-bit), lalu resolusi, fps, bitrate tertinggi
         $sort = $mode === 'original' ? "res$limit,fps" : "hdr:SDR,res$limit,fps,vbr";
-        $args[] = '-f ' . escapeshellarg('bv*+ba/b');
-        $args[] = '-S ' . escapeshellarg($sort);
-        $args[] = '--merge-output-format ' . escapeshellarg('mp4/mkv');
+        $args[] = '-f ' . sh_arg('bv*+ba/b');
+        $args[] = '-S ' . sh_arg($sort);
+        $args[] = '--merge-output-format ' . sh_arg('mp4/mkv');
     }
     $args[] = '--';
-    $args[] = escapeshellarg($job['url']);
+    $args[] = sh_arg($job['url']);
 
     $part = 0;
     $parts = $isAudio ? 1 : 2;
@@ -491,8 +526,8 @@ try {
     $tag = $isAudio ? '' : quality_tag($p);
     $srcExt = pathinfo($source, PATHINFO_EXTENSION);
 
-    $ffBase = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i '
-        . escapeshellarg($source);
+    $ffBase = sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i '
+        . sh_arg($source);
     $commands = []; // daftar alternatif: kalau yang pertama gagal, coba berikutnya
     $note = '';
 
@@ -568,7 +603,7 @@ try {
                 'progress' => 0, 'speed' => '', 'eta' => '',
             ]);
             $lastWrite = 0;
-            [$code, $tail] = run($cmd . ' ' . escapeshellarg($output), function (string $line) use ($id, $duration, &$lastWrite) {
+            [$code, $tail] = run($cmd . ' ' . sh_arg($output), function (string $line) use ($id, $duration, &$lastWrite) {
                 static $speed = '';
                 if (str_starts_with($line, 'speed=')) {
                     $speed = trim(substr($line, 6));

@@ -3,7 +3,7 @@
 // Dipakai oleh clip.php. Fungsi run(), error_from() dan class Cancelled berasal dari worker.php.
 
 const SUB_FONT = 'Arial Black';
-const SUB_FONTS_DIR = __DIR__ . '/assets/fonts';
+const SUB_FONTS_DIR = APP_DIR . '/assets/fonts';
 
 /**
  * Pilihan font subtitle & hook: key => [label, kategori]. File ada di assets/fonts/{key}.ttf (Google Fonts),
@@ -83,8 +83,8 @@ const SUB_HIGHLIGHT = '&H0000D4FF'; // kuning #FFD400 dalam format ASS (&HAABBGG
 function whisper_words(string $wav, string $lang, string $tmpDir, string $cancelFlag, string $prefix = ''): array
 {
     $out = "$tmpDir/words";
-    $cmd = $prefix . escapeshellarg(WHISPER_CLI) . ' -m ' . escapeshellarg(WHISPER_MODEL) . ' -f ' . escapeshellarg($wav)
-        . ' -l ' . escapeshellarg($lang ?: 'auto') . ' -t 4 -ml 1 -sow -oj -np -of ' . escapeshellarg($out);
+    $cmd = $prefix . sh_arg(WHISPER_CLI) . ' -m ' . sh_arg(WHISPER_MODEL) . ' -f ' . sh_arg($wav)
+        . ' -l ' . sh_arg($lang ?: 'auto') . ' -t 4 -ml 1 -sow -oj -np -of ' . sh_arg($out);
     // stdout whisper berisi transkrip lengkap; tidak perlu ditampung
     [$code, $tail] = run($cmd, fn() => null, $cancelFlag, 600);
     $data = json_decode((string) @file_get_contents("$out.json"), true);

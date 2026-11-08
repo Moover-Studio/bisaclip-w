@@ -129,9 +129,9 @@ function boundaries_from_units(array $units): array
 /** Titik potong kandidat dari deteksi hening (mode audio). */
 function boundaries_from_silence(string $audio): array
 {
-    $cmd = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -i ' . escapeshellarg($audio)
+    $cmd = sh_arg(FFMPEG) . ' -hide_banner -nostdin -i ' . sh_arg($audio)
         . ' -af silencedetect=noise=-32dB:d=0.25 -f null - 2>&1';
-    $out = (string) shell_exec($cmd);
+    $out = (string) sh_out($cmd);
     $starts = $ends = [];
     preg_match_all('/silence_start: ([\d.]+)/', $out, $ss);
     preg_match_all('/silence_end: ([\d.]+) \| silence_duration: ([\d.]+)/', $out, $se);
@@ -566,8 +566,8 @@ function run_analysis(string $id, array $job, string $tmpDir, string $cancelFlag
     // ---------- 1. Info video ----------
     update_job($id, ['status' => 'analyzing', 'stage' => 'Membaca info video…', 'progress' => 5]);
     $raw = '';
-    [$code, $tail] = run(escapeshellarg(YTDLP) . ' --dump-single-json --no-playlist --no-warnings --socket-timeout 20 -- '
-        . escapeshellarg($job['url']), function ($line) use (&$raw) {
+    [$code, $tail] = run(sh_arg(YTDLP) . ' --dump-single-json --no-playlist --no-warnings --socket-timeout 20 -- '
+        . sh_arg($job['url']), function ($line) use (&$raw) {
             if ($line !== '' && $line[0] === '{') {
                 $raw = $line;
             }
@@ -600,9 +600,9 @@ function run_analysis(string $id, array $job, string $tmpDir, string $cancelFlag
     $sourceLabel = '';
     if ($manualKey || $autoKey) {
         $langs = implode(',', array_filter([$manualKey, $autoKey]));
-        run(escapeshellarg(YTDLP) . ' --skip-download --no-warnings --write-subs --write-auto-subs --sub-format json3'
-            . ' --sub-langs ' . escapeshellarg($langs) . ' -o ' . escapeshellarg("$tmpDir/sub") . ' -- '
-            . escapeshellarg($job['url']), fn() => null, $cancelFlag, 120);
+        run(sh_arg(YTDLP) . ' --skip-download --no-warnings --write-subs --write-auto-subs --sub-format json3'
+            . ' --sub-langs ' . sh_arg($langs) . ' -o ' . sh_arg("$tmpDir/sub") . ' -- '
+            . sh_arg($job['url']), fn() => null, $cancelFlag, 120);
         $manualUnits = $manualKey ? parse_json3("$tmpDir/sub.$manualKey.json3") : [];
         $autoUnits = $autoKey ? parse_json3("$tmpDir/sub.$autoKey.json3") : [];
         $textUnits = $manualUnits ?: $autoUnits;
@@ -635,15 +635,15 @@ function run_analysis(string $id, array $job, string $tmpDir, string $cancelFlag
     } else {
         // ---------- 3b. Tidak ada subtitle: Gemini mendengarkan audio ----------
         update_job($id, ['stage' => 'Tidak ada subtitle, mengunduh audio…', 'progress' => 20]);
-        [$code, $tail] = run(escapeshellarg(YTDLP) . ' --no-warnings --no-playlist -f ' . escapeshellarg('ba[abr<=96]/ba/b')
-            . ' -o ' . escapeshellarg("$tmpDir/audio_src.%(ext)s") . ' -- ' . escapeshellarg($job['url']), fn() => null, $cancelFlag);
+        [$code, $tail] = run(sh_arg(YTDLP) . ' --no-warnings --no-playlist -f ' . sh_arg('ba[abr<=96]/ba/b')
+            . ' -o ' . sh_arg("$tmpDir/audio_src.%(ext)s") . ' -- ' . sh_arg($job['url']), fn() => null, $cancelFlag);
         $src = glob("$tmpDir/audio_src.*")[0] ?? null;
         if ($code !== 0 || !$src) {
             throw new RuntimeException(error_from($tail));
         }
         $audio = "$tmpDir/audio.mp3";
-        run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($src)
-            . ' -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k ' . escapeshellarg($audio), fn() => null, $cancelFlag);
+        run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($src)
+            . ' -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k ' . sh_arg($audio), fn() => null, $cancelFlag);
         if (!is_file($audio)) {
             throw new RuntimeException('Gagal menyiapkan audio.');
         }

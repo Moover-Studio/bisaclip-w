@@ -36,9 +36,9 @@ function clip_filter(string $layout): string
 function clip_streams(string $url, string $cancelFlag): array
 {
     $raw = '';
-    [$code, $tail] = run(escapeshellarg(YTDLP) . ' -j --no-playlist --no-warnings'
-        . ' -f ' . escapeshellarg('bv*[protocol=https]+ba[protocol=https]/b[protocol=https]/bv*+ba/b')
-        . ' -S ' . escapeshellarg('hdr:SDR,res,fps,vbr') . ' --socket-timeout 20 -- ' . escapeshellarg($url),
+    [$code, $tail] = run(sh_arg(YTDLP) . ' -j --no-playlist --no-warnings'
+        . ' -f ' . sh_arg('bv*[protocol=https]+ba[protocol=https]/b[protocol=https]/bv*+ba/b')
+        . ' -S ' . sh_arg('hdr:SDR,res,fps,vbr') . ' --socket-timeout 20 -- ' . sh_arg($url),
         function ($line) use (&$raw) {
             if ($line !== '' && $line[0] === '{') {
                 $raw = $line;
@@ -76,8 +76,8 @@ function clip_inputs(array $video, ?array $audio, float $start): array
         $local = str_starts_with($f['url'], '/');
         // Potongan sumber lokal: posisi dihitung dari awal potongan
         $inputs .= ' -ss ' . number_format(max(0, $start - (float) ($f['shift'] ?? 0)), 3, '.', '')
-            . ($headers && !$local ? ' -headers ' . escapeshellarg($headers) : '')
-            . ($local ? '' : ' -reconnect 1 -reconnect_streamed 1') . ' -i ' . escapeshellarg($f['url']);
+            . ($headers && !$local ? ' -headers ' . sh_arg($headers) : '')
+            . ($local ? '' : ' -reconnect 1 -reconnect_streamed 1') . ' -i ' . sh_arg($f['url']);
         $index[$f['format_id']] = $n++;
     }
     return [$inputs, $index[$video['format_id']], $audio ? $index[$audio['format_id']] : null];
@@ -117,8 +117,8 @@ function clip_subtitles(string $id, array $job, ?array $audio, float $start, flo
             @unlink($wav);
             [$inputs] = clip_inputs($audio, null, $start);
             try {
-                [$code] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
-                    . ' -t ' . number_format($dur, 3, '.', '') . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le ' . escapeshellarg($wav),
+                [$code] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . $inputs
+                    . ' -t ' . number_format($dur, 3, '.', '') . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le ' . sh_arg($wav),
                     fn() => null, $cancelFlag, 120);
             } catch (Cancelled $e) {
                 throw $e;
@@ -174,9 +174,9 @@ function speaker_segments(string $id, array $job, float $start, float $dur, stri
     $tmpDir = TMP_DIR . '/' . $id;
     update_job($id, ['status' => 'converting', 'stage' => 'Mendeteksi wajah & pembicara…', 'progress' => 0]);
     $raw = '';
-    run(escapeshellarg(YTDLP) . ' -j --no-playlist --no-warnings'
-        . ' -f ' . escapeshellarg('bv*[height<=480][protocol=https]/bv*[height<=480]/bv*')
-        . ' -S ' . escapeshellarg('res,fps') . ' --socket-timeout 20 -- ' . escapeshellarg($job['url']),
+    run(sh_arg(YTDLP) . ' -j --no-playlist --no-warnings'
+        . ' -f ' . sh_arg('bv*[height<=480][protocol=https]/bv*[height<=480]/bv*')
+        . ' -S ' . sh_arg('res,fps') . ' --socket-timeout 20 -- ' . sh_arg($job['url']),
         function ($line) use (&$raw) {
             if ($line !== '' && $line[0] === '{') {
                 $raw = $line;
@@ -189,12 +189,12 @@ function speaker_segments(string $id, array $job, float $start, float $dur, stri
     $w = 640;
     $h = (int) (round(640 * $f['height'] / $f['width'] / 2) * 2);
     [$inputs] = clip_inputs($f, null, $start);
-    $words = is_file("$tmpDir/words_clip.json") ? ' --words ' . escapeshellarg("$tmpDir/words_clip.json") : '';
+    $words = is_file("$tmpDir/words_clip.json") ? ' --words ' . sh_arg("$tmpDir/words_clip.json") : '';
     $out = "$tmpDir/track.json";
-    $cmd = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error' . $inputs . ' -t ' . number_format($dur, 3, '.', '')
-        . " -an -vf fps=10,scale=$w:$h -f rawvideo -pix_fmt bgr24 - | " . escapeshellarg(PYTHON) . ' '
-        . escapeshellarg(APP_DIR . '/tools/speaker_track.py') . " --width $w --height $h --fps 10"
-        . ' --model ' . escapeshellarg(FACE_MODEL) . $words . ' --out ' . escapeshellarg($out);
+    $cmd = sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error' . $inputs . ' -t ' . number_format($dur, 3, '.', '')
+        . " -an -vf fps=10,scale=$w:$h -f rawvideo -pix_fmt bgr24 - | " . sh_arg(PYTHON) . ' '
+        . sh_arg(APP_DIR . '/tools/speaker_track.py') . " --width $w --height $h --fps 10"
+        . ' --model ' . sh_arg(FACE_MODEL) . $words . ' --out ' . sh_arg($out);
     run($cmd, fn() => null, $cancelFlag, 300);
     $data = json_decode((string) @file_get_contents($out), true);
     if (!is_array($data) || empty($data['segments']) || empty($data['faces'])) {
@@ -378,8 +378,8 @@ function mix_graph(?array $edit, int $topH, string $in, string $out): string
         if (!$m || !is_file($path)) {
             continue;
         }
-        $info = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height -of json '
-            . escapeshellarg($path)), true);
+        $info = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height -of json '
+            . sh_arg($path)), true);
         $iw = (int) ($info['streams'][0]['width'] ?? 0);
         $ih = (int) ($info['streams'][0]['height'] ?? 0);
         if (!$iw || !$ih) {
@@ -390,7 +390,7 @@ function mix_graph(?array $edit, int $topH, string $in, string $out): string
         $h = (int) min(8640, max(2, round($ih * $k / 2) * 2));
         $x = (int) round(1080 * (float) ($m['cx'] ?? 0.5) - $w / 2);
         $y = (int) round($ph * (float) ($m['cy'] ?? 0.5) - $h / 2);
-        $src = "movie=$path" . (($m['kind'] ?? '') === 'video' ? ':loop=0,setpts=N/FRAME_RATE/TB' : '');
+        $src = "movie=" . ff_path($path) . (($m['kind'] ?? '') === 'video' ? ':loop=0,setpts=N/FRAME_RATE/TB' : '');
         $parts[] = "$src,scale=$w:$h:flags=lanczos,setsar=1,format=yuva420p[mxs$n]";
         $parts[] = "color=c=black:s=1080x$ph:r=60,format=yuva420p[mxb$n]";
         $parts[] = "[mxb$n][mxs$n]overlay=$x:$y:eof_action=repeat:format=auto[mxm$n]";
@@ -591,7 +591,7 @@ function footage_concat(string $id, string $output, array $seq, array $encoders,
         $isImg = !$isMain && $it['kind'] === 'image';
         $info = $isImg ? null : ($isMain ? $main : probe($file));
         $d = round($isMain ? (float) $main['duration'] : min((float) $it['dur'], $isImg ? 60 : ((float) $info['duration'] ?: $it['dur'])), 3);
-        $inputs .= ($isImg ? " -loop 1 -framerate $fps" : '') . " -t $d -i " . escapeshellarg($file);
+        $inputs .= ($isImg ? " -loop 1 -framerate $fps" : '') . " -t $d -i " . sh_arg($file);
         $fits[$n] = $isMain ? "scale=$W:$H"
             : "split[fa$n][fb$n];[fa$n]scale=$W:$H:force_original_aspect_ratio=increase,crop=$W:$H,boxblur=40:2[bg$n];"
             . "[fb$n]scale=$W:$H:force_original_aspect_ratio=decrease[fg$n];[bg$n][fg$n]overlay=(W-w)/2:(H-h)/2"
@@ -605,7 +605,7 @@ function footage_concat(string $id, string $output, array $seq, array $encoders,
     foreach ($seq as $n => $it) {
         $vo = $it !== 'main' && !empty($it['vo']) && $voiceDir !== '' ? "$voiceDir/{$it['vo']}" : '';
         if ($vo !== '' && is_file($vo) && !$mute) {
-            $inputs .= ' -i ' . escapeshellarg($vo);
+            $inputs .= ' -i ' . sh_arg($vo);
             $voIn[$n] = $extra++;
         }
     }
@@ -646,7 +646,7 @@ function footage_concat(string $id, string $output, array $seq, array $encoders,
             [, $td] = $tin[$n];
             [$pdir, $frames] = paper_assets($cancelFlag);
             $rate = number_format($frames / max(0.1, $td), 4, '.', '');
-            $inputs .= " -framerate $rate -i " . escapeshellarg("$pdir/mask_%02d.png") . " -framerate $rate -i " . escapeshellarg("$pdir/paper_%02d.png");
+            $inputs .= " -framerate $rate -i " . sh_arg("$pdir/mask_%02d.png") . " -framerate $rate -i " . sh_arg("$pdir/paper_%02d.png");
             [$mi, $pi] = [$extra, $extra + 1];
             $extra += 2;
             $cut = round($curLen - $td, 3);
@@ -682,9 +682,9 @@ function footage_concat(string $id, string $output, array $seq, array $encoders,
     $out = TMP_DIR . "/$id/footage.mp4";
     $lastError = '';
     foreach ($encoders as $enc) {
-        $cmd = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
-            . ' -/filter_complex ' . escapeshellarg($graphFile) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart "
-            . escapeshellarg($out);
+        $cmd = sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
+            . ' -/filter_complex ' . sh_arg($graphFile) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart "
+            . sh_arg($out);
         [$code, $tail] = run($cmd, function (string $line) use ($id, $total) {
             if (str_starts_with($line, 'out_time_us=')) {
                 update_job($id, ['progress' => round(min(99.9, ((int) substr($line, 12)) / 1e6 / max(0.1, $total) * 100), 1)]);
@@ -733,10 +733,10 @@ const SUPERRES_BIN = APP_DIR . '/tools/superres';
 function superres_cmd(): ?string
 {
     if (IS_MAC) {
-        return is_executable(SUPERRES_BIN) ? escapeshellarg(SUPERRES_BIN) : null;
+        return is_executable(SUPERRES_BIN) ? sh_arg(SUPERRES_BIN) : null;
     }
     return is_file(PYTHON) && is_file(STORAGE_DIR . '/models/realesr-general-x4v3.pth')
-        ? escapeshellarg(PYTHON) . ' ' . escapeshellarg(APP_DIR . '/tools/superres.py') : null;
+        ? sh_arg(PYTHON) . ' ' . sh_arg(APP_DIR . '/tools/superres.py') : null;
 }
 const AI_W = 1440;
 const AI_H = 2560;
@@ -751,8 +751,8 @@ function ai_upscale(string $id, string $base, string $output, array $edit, array
     $assPath = $assPaths['sub'] ?? null ?: ($assPaths['text'] ?? null);
     $info = probe($base);
     $dur = max(0.1, (float) $info['duration']);
-    $rate = trim((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 '
-        . escapeshellarg($base))) ?: '30';
+    $rate = trim((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 '
+        . sh_arg($base))) ?: '30';
     $mbps = video_bitrate(['width' => AI_W, 'height' => AI_H, 'fps' => $info['fps']]);
     $encoders = clip_encoders($mbps);
     // Lapisan media / teks / subtitle ditumpuk langsung di 2K sesuai urutan editor
@@ -765,7 +765,7 @@ function ai_upscale(string $id, string $base, string $output, array $edit, array
     $graphUp = TMP_DIR . "/$id/layers_up.txt";
     file_put_contents($graphUp, '[0:v]scale=' . AI_W . ':' . AI_H . ":flags=lanczos+accurate_rnd+full_chroma_int,cas=0.4[up];\n"
         . graph_with_opening(layers_chain($edit, 'up', 'v', $assPaths, $k), $opening, $fpsAi));
-    $bin = escapeshellarg($assPath ? FFMPEG_FULL : FFMPEG);
+    $bin = sh_arg($assPath ? FFMPEG_FULL : FFMPEG);
     $onLine = function (string $line) use ($id, $dur) {
         if (str_starts_with($line, 'out_time_us=')) {
             update_job($id, ['progress' => round(min(99.9, ((int) substr($line, 12)) / 1e6 / $dur * 100), 1)]);
@@ -779,16 +779,16 @@ function ai_upscale(string $id, string $base, string $output, array $edit, array
         foreach ($encoders as $enc) {
             update_job($id, ['status' => 'converting', 'stage' => $useAi ? 'AI upscale ke 2K…' : 'Menskalakan ke 2K…', 'progress' => 0]);
             if ($useAi) {
-                $pipe = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . escapeshellarg($base)
+                $pipe = sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . sh_arg($base)
                     . ' -vf scale=540:960:flags=area -f rawvideo -pix_fmt bgra - | '
                     . superres_cmd() . ' 540 960 ' . AI_W . ' ' . AI_H . ' ll | '
                     . "$bin -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -f rawvideo -pix_fmt bgra -s " . AI_W . 'x' . AI_H
-                    . " -framerate $rate -i - -i " . escapeshellarg($base) . ' -/filter_complex ' . escapeshellarg($graphAi) . " -map '[v]' -map '1:a?'"
-                    . " $enc -c:a copy -shortest -movflags +faststart " . escapeshellarg($output);
-                $cmd = '/bin/bash -c ' . escapeshellarg("set -o pipefail; $pipe");
+                    . " -framerate $rate -i - -i " . sh_arg($base) . ' -/filter_complex ' . sh_arg($graphAi) . " -map '[v]' -map '1:a?'"
+                    . " $enc -c:a copy -shortest -movflags +faststart " . sh_arg($output);
+                $cmd = '/bin/bash -c ' . sh_arg("set -o pipefail; $pipe");
             } else {
-                $cmd = "$bin -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i " . escapeshellarg($base)
-                    . ' -/filter_complex ' . escapeshellarg($graphUp) . " -map '[v]' -map '0:a?' $enc -c:a copy -movflags +faststart " . escapeshellarg($output);
+                $cmd = "$bin -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i " . sh_arg($base)
+                    . ' -/filter_complex ' . sh_arg($graphUp) . " -map '[v]' -map '0:a?' $enc -c:a copy -movflags +faststart " . sh_arg($output);
             }
             [$code, $tail] = run($cmd, $onLine, $cancelFlag);
             clearstatcache();
@@ -851,8 +851,8 @@ function ref_layers_pass(string $id, string $file, array $g, array $encoders, st
     $out = TMP_DIR . "/$id/reflayers.mp4";
     $lastError = '';
     foreach ($encoders as $enc) {
-        $cmd = escapeshellarg(FFMPEG_FULL) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . escapeshellarg($file)
-            . ' -/filter_complex ' . escapeshellarg($graphFile) . " -map '[v]' -map '0:a?' $enc -c:a copy -movflags +faststart " . escapeshellarg($out);
+        $cmd = sh_arg(FFMPEG_FULL) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . sh_arg($file)
+            . ' -/filter_complex ' . sh_arg($graphFile) . " -map '[v]' -map '0:a?' $enc -c:a copy -movflags +faststart " . sh_arg($out);
         [$code, $tail] = run($cmd, function (string $line) use ($id, $total) {
             if (str_starts_with($line, 'out_time_us=')) {
                 update_job($id, ['progress' => round(min(99.9, ((int) substr($line, 12)) / 1e6 / $total * 100), 1)]);
@@ -873,12 +873,12 @@ function mix_music(string $id, string $output, array $music, string $cancelFlag,
     update_job($id, ['status' => 'converting', 'stage' => $stage, 'progress' => 0]);
     $info = probe($output);
     $dur = max(0.1, (float) $info['duration']);
-    $inputs = ' -i ' . escapeshellarg($output);
+    $inputs = ' -i ' . sh_arg($output);
     $graph = [];
     $labels = [];
     foreach ($music as $k => $m) {
         $n = $k + 1;
-        $inputs .= ' -i ' . escapeshellarg($m['file']);
+        $inputs .= ' -i ' . sh_arg($m['file']);
         $f = sprintf('[%d:a]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume=%s',
             $n, $m['off'], $m['len'], !empty($m['kfexpr']) ? "'" . $m['kfexpr'] . "':eval=frame" : sprintf('%.3f', $m['vol']));
         if ($m['fin'] > 0) {
@@ -903,9 +903,9 @@ function mix_music(string $id, string $output, array $music, string $cancelFlag,
     @mkdir(dirname($graphFile), 0777, true);
     file_put_contents($graphFile, implode(";\n", $graph));
     $tmp = TMP_DIR . "/$id/music.mp4";
-    $cmd = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
-        . ' -/filter_complex ' . escapeshellarg($graphFile) . " -map 0:v -map '[aout]' -c:v copy"
-        . ($info['vcodec'] === 'hevc' ? ' -tag:v hvc1' : '') . ' -c:a aac -b:a 320k -movflags +faststart ' . escapeshellarg($tmp);
+    $cmd = sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
+        . ' -/filter_complex ' . sh_arg($graphFile) . " -map 0:v -map '[aout]' -c:v copy"
+        . ($info['vcodec'] === 'hevc' ? ' -tag:v hvc1' : '') . ' -c:a aac -b:a 320k -movflags +faststart ' . sh_arg($tmp);
     [$code, $tail] = run($cmd, function (string $line) use ($id, $dur) {
         if (str_starts_with($line, 'out_time_us=')) {
             update_job($id, ['progress' => round(min(99.9, ((int) substr($line, 12)) / 1e6 / $dur * 100), 1)]);
@@ -1109,7 +1109,7 @@ function run_clip(string $id, array $job, string $cancelFlag): void
 
         // Subtitle dibakar setelah layout (crop/blur), memakai ffmpeg-full yang punya libass.
         // Filtergraph ditulis ke file (-/filter_complex) karena bisa panjang untuk mode ikuti pembicara.
-        $ass = $assPath && !$edit && !$aiMode ? 'ass=filename=' . $assPath . ':fontsdir=' . SUB_FONTS_DIR : '';
+        $ass = $assPath && !$edit && !$aiMode ? 'ass=filename=' . ff_path($assPath) . ':fontsdir=' . ff_path(SUB_FONTS_DIR) : '';
         $target = $aiMode ? $baseFile : $output;
         // Urutan: layout -> (tajamkan) -> efek -> lapisan media / teks / subtitle sesuai urutan editor.
         // Mode AI: lapisan dibakar setelah upscale 2K (lihat ai_upscale), jadi di sini hanya efek.
@@ -1125,9 +1125,9 @@ function run_clip(string $id, array $job, string $cancelFlag): void
         $mixG = $frameMask && $layout !== 'split' ? mix_graph($edit, $fH, 'fmq', 'fmo') : '';
         $masked0 = fn(string $from) => !$frameMask ? "[$from]null[fmo];\n" : ($frameBlur
             ? "[$from]split[fga][fgb];\n[fgb]crop=1080:$fH:0:$fY0,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                . "boxblur=25:3,eq=brightness=-0.08,format=rgba[fbg];\nmovie=$frameMask,format=rgba,alphaextract[fma];\n"
+                . "boxblur=25:3,eq=brightness=-0.08,format=rgba[fbg];\nmovie=" . ff_path($frameMask) . ",format=rgba,alphaextract[fma];\n"
                 . "[fbg][fma]alphamerge[fbm];\n[fga][fbm]overlay=0:0:format=auto[fmo];\n"
-            : "movie=$frameMask,format=rgba[fmk];\n[$from][fmk]overlay=0:0:format=auto[fmo];\n");
+            : "movie=" . ff_path($frameMask) . ",format=rgba[fmk];\n[$from][fmk]overlay=0:0:format=auto[fmo];\n");
         $masked = fn(string $from) => $mixG === '' ? $masked0($from)
             : str_replace('[fmo]', '[fmq]', $masked0($from)) . "$mixG;\n";
         if (($layout === 'speaker' || $layout === 'split') && $segments) {
@@ -1155,7 +1155,7 @@ function run_clip(string $id, array $job, string $cancelFlag): void
         if ($graph !== '') {
             $graphFile = TMP_DIR . "/$id/graph.txt";
             file_put_contents($graphFile, $graph);
-            $vmap = '-/filter_complex ' . escapeshellarg($graphFile) . " -map '[v]'";
+            $vmap = '-/filter_complex ' . sh_arg($graphFile) . " -map '[v]'";
         } else {
             $vmap = "-map $vi:v:0 -pix_fmt yuv420p";
         }
@@ -1167,11 +1167,11 @@ function run_clip(string $id, array $job, string $cancelFlag): void
         $afilter = $vol !== 100 ? ' -af volume=' . number_format($vol / 100, 2, '.', '') : '';
         // Keyframe volume dari editor: kurva volume (t=0 = awal clip)
         if (empty($edit['tracks']['video']['mute']) && !empty($edit['volKf'])) {
-            $afilter = ' -af ' . escapeshellarg("volume='" . volume_kf_expr($edit['volKf'], (float) $edit['trim'][0]) . "':eval=frame");
+            $afilter = ' -af ' . sh_arg("volume='" . volume_kf_expr($edit['volKf'], (float) $edit['trim'][0]) . "':eval=frame");
         }
         $amap = $ai !== null ? "-map $ai:a:0$afilter -c:a aac -b:a 320k" : '-an';
         $bin = $assPath && !$aiMode ? FFMPEG_FULL : FFMPEG;
-        $base = escapeshellarg($bin) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1'
+        $base = sh_arg($bin) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1'
             . $inputs . ' -t ' . number_format($dur, 3, '.', '') . " $vmap $amap -movflags +faststart";
         // Video dasar mode AI hanya perantara (dihapus setelah upscale), jadi tetap kualitas maksimal
         $encoders = $aiMode ? clip_encoders($mbps, 'max') : clip_encoders($mbps);
@@ -1181,7 +1181,7 @@ function run_clip(string $id, array $job, string $cancelFlag): void
                 'progress' => 0, 'speed' => '', 'eta' => '']);
             $lastWrite = 0;
             try {
-                [$code, $tail] = run("$base $enc " . escapeshellarg($target), function (string $line) use ($id, $dur, &$lastWrite) {
+                [$code, $tail] = run("$base $enc " . sh_arg($target), function (string $line) use ($id, $dur, &$lastWrite) {
                     if (str_starts_with($line, 'out_time_us=') && microtime(true) - $lastWrite > 0.7) {
                         $sec = ((int) substr($line, 12)) / 1e6;
                         update_job($id, ['progress' => round(min(99.9, max(0, $sec / $dur * 100)), 1)]);
@@ -1264,9 +1264,9 @@ function run_clip(string $id, array $job, string $cancelFlag): void
             $cutOut = TMP_DIR . "/$id/cut.mp4";
             $cutOk = false;
             foreach ($encoders as $enc) {
-                $cmd = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . escapeshellarg($file)
-                    . ' -vf ' . escapeshellarg("select='$expr',setpts=N/FRAME_RATE/TB") . ' -af ' . escapeshellarg("aselect='$expr',asetpts=N/SR/TB")
-                    . " $enc -c:a aac -b:a 320k -movflags +faststart " . escapeshellarg($cutOut);
+                $cmd = sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . sh_arg($file)
+                    . ' -vf ' . sh_arg("select='$expr',setpts=N/FRAME_RATE/TB") . ' -af ' . sh_arg("aselect='$expr',asetpts=N/SR/TB")
+                    . " $enc -c:a aac -b:a 320k -movflags +faststart " . sh_arg($cutOut);
                 [$code, $tail] = run($cmd, function (string $line) use ($id, $keptDur) {
                     if (str_starts_with($line, 'out_time_us=')) {
                         update_job($id, ['progress' => round(min(99.9, ((int) substr($line, 12)) / 1e6 / max(0.1, $keptDur) * 100), 1)]);

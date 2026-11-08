@@ -1,0 +1,228 @@
+# Pasang semua kebutuhan BisaClip di Windows 10/11 dengan XAMPP for Windows (tanpa WSL).
+# Dijalankan oleh "Install BisaClip.bat" di folder aplikasi (mis. C:\xampp\htdocs\bisaclip-w).
+# Aman dijalankan ulang (juga setelah git pull): yang sudah ada dilewati, yt-dlp selalu diperbarui, data tidak disentuh.
+# Opsi: -NoCuda  jangan pakai GPU NVIDIA untuk whisper & AI upscale.
+# Catatan: file ini sengaja hanya berisi karakter ASCII (Windows PowerShell 5.1 membaca file tanpa BOM sebagai ANSI).
+param([switch]$NoCuda)
+
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+$App = (Resolve-Path "$PSScriptRoot\..").Path
+$Bin = "$App\storage\bin"
+$Models = "$App\storage\models"
+$Tmp = Join-Path $env:TEMP ('bisaclip-setup-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+
+function Say([string]$m) { Write-Host ''; Write-Host "==> $m" -ForegroundColor Cyan }
+function Ok([string]$m) { Write-Host "    [OK] $m" -ForegroundColor Green }
+function Warn([string]$m) { Write-Host "    [!]  $m" -ForegroundColor Yellow }
+function Fail([string]$m) { Write-Host ''; Write-Host "GAGAL: $m" -ForegroundColor Red; exit 1 }
+# Unduh dengan curl.exe bawaan Windows (lebih cepat dari Invoke-WebRequest, bisa dilanjutkan)
+function Fetch([string]$url, [string]$dest, [switch]$Quiet) {
+    $part = "$dest.part"
+    $a = @('-fL', '--retry', '3', '-o', $part, $url)
+    if ($Quiet) { $a = @('-s') + $a } else { $a = @('--progress-bar', '-C', '-') + $a }
+    & curl.exe @a
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $part)) { Remove-Item -Force $part -ErrorAction SilentlyContinue; return $false }
+    Move-Item -Force $part $dest
+    return $true
+}
+
+Write-Host ''
+Write-Host '  BisaClip - Setup Windows (XAMPP)' -ForegroundColor White
+Write-Host '  Biarkan jendela ini terbuka sampai selesai (pertama kali 15-30 menit, sebagian besar menunggu unduhan).'
+New-Item -ItemType Directory -Force -Path $Bin, $Models, $Tmp, "$App\storage\tmp", "$App\downloads", "$App\previews", "$App\avatars" | Out-Null
+
+# ---------- 1. XAMPP (PHP) ----------
+Say 'Memeriksa XAMPP...'
+$Php = $null
+$m = [regex]::Match($App, '^(.*)\\htdocs\\')
+foreach ($c in @($(if ($m.Success) { $m.Groups[1].Value + '\php\php.exe' }), 'C:\xampp\php\php.exe')) {
+    if ($c -and (Test-Path $c)) { $Php = $c; break }
+}
+if (-not $Php) { Fail 'XAMPP belum terpasang. Pasang XAMPP for Windows (apachefriends.org) di C:\xampp, lalu jalankan ini lagi.' }
+$phpVer = (& $Php -r 'echo PHP_VERSION;')
+if ([version]($phpVer -replace '[^0-9.].*$', '') -lt [version]'8.1') { Fail "PHP $phpVer terlalu lama. Pasang XAMPP versi terbaru (PHP 8.2 ke atas)." }
+Ok "PHP $phpVer ($Php)"
+$mods = (& $Php -m) -join ' '
+foreach ($x in @('curl', 'mbstring', 'openssl', 'json')) {
+    if ($mods -notmatch "(?i)\b$x\b") { Warn "Ekstensi PHP '$x' belum aktif: buka C:\xampp\php\php.ini, hapus tanda ; di depan extension=$x, lalu restart Apache." }
+}
+if (-not $m.Success) { Warn "Folder aplikasi sebaiknya di dalam C:\xampp\htdocs supaya bisa dibuka lewat http://localhost/..." }
+
+# ---------- 2. Git Bash (dipakai untuk menjalankan semua perintah ffmpeg/python) ----------
+Say 'Memeriksa Git Bash...'
+$Bash = @("$env:ProgramFiles\Git\bin\bash.exe", "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe", "${env:ProgramFiles(x86)}\Git\bin\bash.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $Bash) {
+    Warn 'Git for Windows belum ada, memasang lewat winget...'
+    & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+    $Bash = @("$env:ProgramFiles\Git\bin\bash.exe", "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $Bash) { Fail 'Git for Windows belum terpasang. Pasang dari git-scm.com/download/win, lalu jalankan ini lagi.' }
+Ok $Bash
+
+# ---------- 3. GPU ----------
+$Gpu = $false
+$Cc = 0.0
+$smi = "$env:WINDIR\System32\nvidia-smi.exe"
+if (-not $NoCuda -and (Test-Path $smi)) {
+    $name = (& $smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -eq 0 -and $name) {
+        $Gpu = $true
+        try { $Cc = [double]((& $smi --query-gpu=compute_cap --format=csv,noheader 2>$null | Select-Object -First 1).Trim()) } catch { $Cc = 0 }
+        Ok "GPU NVIDIA: $name"
+    }
+}
+if (-not $Gpu) { Warn 'Tanpa GPU NVIDIA: render & transkrip memakai CPU (hasil sama, lebih lambat), AI upscale memakai scaling biasa.' }
+
+# ---------- 4. ffmpeg (build lengkap: libass, x264, x265, NVENC) ----------
+Say 'Memasang ffmpeg...'
+if (-not (Test-Path "$Bin\ffmpeg.exe") -or -not (Test-Path "$Bin\ffprobe.exe")) {
+    if (-not (Fetch 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' "$Tmp\ff.zip")) { Fail 'Gagal mengunduh ffmpeg. Periksa internet lalu coba lagi.' }
+    Expand-Archive -Force "$Tmp\ff.zip" "$Tmp\ff"
+    Get-ChildItem -Recurse "$Tmp\ff" -Include ffmpeg.exe, ffprobe.exe | Copy-Item -Destination $Bin -Force
+}
+if (((& "$Bin\ffmpeg.exe" -hide_banner -filters 2>$null) -join "`n") -notmatch ' ass ') { Fail 'ffmpeg tanpa libass (subtitle). Hapus storage\bin\ffmpeg.exe lalu jalankan ini lagi.' }
+Ok ((& "$Bin\ffmpeg.exe" -hide_banner -version | Select-Object -First 1).Substring(0, 40))
+
+# ---------- 5. yt-dlp (selalu terbaru) + deno ----------
+Say 'Memasang yt-dlp & deno...'
+if (-not (Fetch 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' "$Bin\yt-dlp.exe" -Quiet)) {
+    if (Test-Path "$Bin\yt-dlp.exe") { Warn 'Gagal memperbarui yt-dlp, memakai versi yang ada.' } else { Fail 'Gagal mengunduh yt-dlp.' }
+}
+Ok ('yt-dlp ' + (& "$Bin\yt-dlp.exe" --version))
+if (-not (Test-Path "$Bin\deno.exe")) {
+    if (-not (Fetch 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' "$Tmp\deno.zip" -Quiet)) { Fail 'Gagal mengunduh deno.' }
+    Expand-Archive -Force "$Tmp\deno.zip" $Bin
+}
+Ok ('deno ' + ((& "$Bin\deno.exe" --version | Select-Object -First 1) -replace '^deno\s+', ''))
+
+# ---------- 6. whisper.cpp (transkrip subtitle) ----------
+Say 'Memasang whisper (transkrip)...'
+function Test-Whisper { if (-not (Test-Path "$Bin\whisper-cli.exe")) { return $false }; & "$Bin\whisper-cli.exe" -h *> $null; return ($LASTEXITCODE -eq 0) }
+if (-not (Test-Whisper)) {
+    $rel = Invoke-RestMethod -UseBasicParsing 'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest'
+    $assets = @($rel.assets)
+    $pick = @()
+    if ($Gpu) { $pick += $assets | Where-Object { $_.name -match '^whisper-cublas-.*-bin-x64\.zip$' } | Sort-Object name -Descending | Select-Object -First 1 }
+    $pick += $assets | Where-Object { $_.name -eq 'whisper-bin-x64.zip' } | Select-Object -First 1
+    foreach ($a in $pick) {
+        if (-not $a) { continue }
+        Write-Host "    mengunduh $($a.name)..."
+        if (-not (Fetch $a.browser_download_url "$Tmp\w.zip")) { continue }
+        Remove-Item -Recurse -Force "$Tmp\w" -ErrorAction SilentlyContinue
+        Expand-Archive -Force "$Tmp\w.zip" "$Tmp\w"
+        Get-ChildItem -Recurse "$Tmp\w" -Include *.exe, *.dll | Copy-Item -Destination $Bin -Force
+        if (Test-Whisper) { break }
+        Warn "$($a.name) tidak bisa dijalankan di laptop ini, mencoba versi lain..."
+    }
+}
+if (-not (Test-Whisper)) { Fail 'whisper-cli gagal dipasang. Periksa internet lalu coba lagi.' }
+Ok 'whisper-cli'
+
+# ---------- 7. Python + OpenCV (deteksi wajah, split screen) ----------
+Say 'Menyiapkan Python...'
+$Venv = "$App\storage\venv\Scripts\python.exe"
+function Find-Python {
+    foreach ($v in @('3.12', '3.13', '3.11')) {
+        $p = (& py "-$v" -c 'import sys;print(sys.executable)' 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $p) { return $p.Trim() }
+    }
+    foreach ($p in @("$env:LOCALAPPDATA\Programs\Python\Python312\python.exe", "$env:ProgramFiles\Python312\python.exe")) { if (Test-Path $p) { return $p } }
+    return $null
+}
+if (-not (Test-Path $Venv)) {
+    $Py = Find-Python
+    if (-not $Py) {
+        Warn 'Python belum ada, memasang Python 3.12 lewat winget...'
+        & winget install --id Python.Python.3.12 -e --source winget --scope user --silent --accept-package-agreements --accept-source-agreements
+        $Py = Find-Python
+    }
+    if (-not $Py) { Fail 'Python gagal dipasang. Pasang Python 3.12 dari python.org (centang "Add to PATH"), lalu jalankan ini lagi.' }
+    & $Py -m venv "$App\storage\venv"
+}
+if (-not (Test-Path $Venv)) { Fail 'Gagal membuat Python venv di storage\venv.' }
+& $Venv -m pip install -q --disable-pip-version-check --upgrade pip
+& $Venv -m pip install -q --disable-pip-version-check numpy opencv-python-headless fonttools
+if ($LASTEXITCODE -ne 0) { Fail 'Gagal memasang paket Python (numpy, opencv). Periksa internet lalu coba lagi.' }
+Ok ('OpenCV ' + (& $Venv -c 'import cv2;print(cv2.__version__)'))
+if ($Gpu) {
+    & $Venv -c 'import torch' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '    memasang PyTorch untuk AI upscale (+-3 GB)...'
+        $cu = if ($Cc -gt 0 -and $Cc -lt 7.0) { 'cu126' } else { 'cu128' }
+        & $Venv -m pip install -q --disable-pip-version-check torch --index-url "https://download.pytorch.org/whl/$cu"
+    }
+    if ((& $Venv -c 'import torch;print(torch.cuda.is_available())' 2>$null) -eq 'True') { Ok 'PyTorch CUDA (AI upscale)' } else { Warn 'PyTorch tidak melihat GPU: AI upscale memakai scaling biasa.' }
+}
+
+# ---------- 8. Model AI ----------
+Say 'Memeriksa model AI...'
+function Model([string]$file, [string]$url) {
+    if ((Test-Path "$Models\$file") -and (Get-Item "$Models\$file").Length -gt 0) { Ok "$file sudah ada"; return }
+    Write-Host "    mengunduh $file..."
+    if (Fetch $url "$Models\$file") { Ok $file } else { Fail "Gagal mengunduh $file. Periksa internet lalu coba lagi." }
+}
+Model 'ggml-large-v3-turbo-q5_0.bin' 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin'
+Model 'face_detection_yunet.onnx' 'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx'
+if ($Gpu) { Model 'realesr-general-x4v3.pth' 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth' }
+
+# ---------- 9. Font Arial Black (gaya subtitle bawaan) ----------
+$ab = "$env:WINDIR\Fonts\ariblk.ttf"
+if ((Test-Path $ab) -and -not (Test-Path "$App\assets\fonts\ariblk.ttf")) { Copy-Item $ab "$App\assets\fonts\ariblk.ttf" }
+
+# ---------- 10. Library tim (musik, SFX, preset, key Gemini bawaan) ----------
+$Lib = @("$App\bisaclip-library.tar.gz", "$env:USERPROFILE\Downloads\bisaclip-library.tar.gz", ([Environment]::GetFolderPath('Desktop') + '\bisaclip-library.tar.gz')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($Lib) {
+    Say "Memasang library tim dari $Lib..."
+    New-Item -ItemType Directory -Force "$Tmp\lib" | Out-Null
+    & "$env:WINDIR\System32\tar.exe" -xzf $Lib -C "$Tmp\lib"
+    if ($LASTEXITCODE -ne 0) { Fail 'File library rusak atau tidak bisa dibuka.' }
+    # File yang sudah ada tidak ditimpa; daftar (musik, SFX, preset) digabung oleh merge-library.php
+    foreach ($d in @('previews', 'storage')) {
+        if (Test-Path "$Tmp\lib\$d") {
+            & robocopy "$Tmp\lib\$d" "$App\$d" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP /XF music.json sfx.json presets.json brands.json mproj_presets.json settings.json | Out-Null
+        }
+    }
+    & $Php "$App\install\merge-library.php" "$Tmp\lib" $App
+    Ok 'Library terpasang'
+} else {
+    Warn 'File bisaclip-library.tar.gz tidak ditemukan (Downloads / Desktop): musik, SFX & preset mulai kosong, API key Gemini diisi di Pengaturan.'
+}
+
+# Pemasangan pertama: kompresi H.264 (HEVC butuh codec tambahan di Windows)
+if (-not (Test-Path "$App\storage\.windows-installed")) {
+    & $Php -r '$f=$argv[1]; $s=json_decode((string)@file_get_contents($f),true); $s=is_array($s)?$s:[]; $s["clip_codec"]="h264"; file_put_contents($f, json_encode($s, JSON_PRETTY_PRINT));' "$App\storage\settings.json"
+    Ok 'Kompresi clip: H.264 (bisa diubah di Pengaturan)'
+}
+Remove-Item -Force "$App\storage\hwenc.json" -ErrorAction SilentlyContinue   # deteksi encoder GPU diulang
+Set-Content -Path "$App\storage\.windows-installed" -Value (Get-Date -Format s)
+
+# ---------- 11. Ikon di Desktop ----------
+$url = 'http://localhost/'
+if ($m.Success) { $url += ($App.Substring($m.Groups[0].Length) -replace '\\', '/') + '/' }
+$desk = [Environment]::GetFolderPath('Desktop')
+Set-Content -Path "$desk\BisaClip.url" -Value "[InternetShortcut]`r`nURL=$url`r`n"
+try {
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut("$desk\Hasil BisaClip.lnk"); $lnk.TargetPath = "$App\downloads"; $lnk.Save()
+} catch { }
+Ok "Ikon Desktop: BisaClip ($url) dan Hasil BisaClip"
+
+# ---------- 12. Cek akhir ----------
+Say 'Cek sistem'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+& $Php "$App\install\doctor.php"
+Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
+
+$up = $false
+try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 $url; $up = $true } catch { }
+Write-Host ''
+if ($up) {
+    Write-Host "  Selesai! Buka $url" -ForegroundColor Green
+    Start-Process $url
+} else {
+    Write-Host '  Selesai! Langkah terakhir:' -ForegroundColor Green
+    Write-Host '    1. Buka XAMPP Control Panel, klik Start di baris Apache.'
+    Write-Host "    2. Klik dua kali ikon BisaClip di Desktop ($url)."
+}
+exit 0

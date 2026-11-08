@@ -89,7 +89,7 @@ function mproj_ai_available(): bool
 /** Info video / gambar: durasi, ukuran, fps, ada audio. */
 function mproj_probe(string $file): array
 {
-    $d = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -print_format json -show_streams -show_format ' . escapeshellarg($file)), true) ?: [];
+    $d = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -print_format json -show_streams -show_format ' . sh_arg($file)), true) ?: [];
     $info = ['duration' => (float) ($d['format']['duration'] ?? 0), 'width' => 0, 'height' => 0, 'fps' => 0, 'audio' => false];
     foreach ($d['streams'] ?? [] as $s) {
         if ($s['codec_type'] === 'video' && !$info['width']) {
@@ -155,14 +155,14 @@ function run_mproj_media(string $id, array $job, string $tmpDir, string $cancelF
     }
     $pub = mproj_pub_dir($pid);
     $image = $m['kind'] === 'image';
-    exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . ($image ? '' : ' -ss ' . sprintf('%.2f', min(1, $info['duration'] / 3)))
-        . ' -i ' . escapeshellarg($src) . ' -frames:v 1 -vf scale=320:-2 -q:v 4 ' . escapeshellarg("$pub/$mid.jpg"));
+    sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error' . ($image ? '' : ' -ss ' . sprintf('%.2f', min(1, $info['duration'] / 3)))
+        . ' -i ' . sh_arg($src) . ' -frames:v 1 -vf scale=320:-2 -q:v 4 ' . sh_arg("$pub/$mid.jpg"));
     @chmod("$pub/$mid.jpg", 0666);
     $patch = ['width' => $info['width'], 'height' => $info['height'], 'thumb' => "previews/manual/$pid/$mid.jpg"];
     if ($image) {
         // Gambar: preview = gambarnya sendiri (diperkecil), durasi bawaan di timeline 3 detik
-        exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($src)
-            . " -vf \"scale='min(1280,iw)':-2\" -q:v 3 " . escapeshellarg("$pub/{$mid}_p.jpg"));
+        sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($src)
+            . " -vf \"scale='min(1280,iw)':-2\" -q:v 3 " . sh_arg("$pub/{$mid}_p.jpg"));
         @chmod("$pub/{$mid}_p.jpg", 0666);
         $patch += ['duration' => 0, 'fps' => 0, 'audio' => false, 'preview' => "previews/manual/$pid/{$mid}_p.jpg"];
     } else {
@@ -172,8 +172,8 @@ function run_mproj_media(string $id, array $job, string $tmpDir, string $cancelF
         $scale = $info['width'] >= $info['height'] ? 'scale=-2:' . min(540, $short) : 'scale=' . min(540, $short) . ':-2';
         $prev = "$pub/$mid.mp4";
         foreach (venc_list(['-c:v h264_videotoolbox -b:v 2500k', '-c:v libx264 -preset veryfast -crf 24']) as $enc) {
-            [$code] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($src)
-                . " -map 0:v:0 -map '0:a:0?' -vf $scale -pix_fmt yuv420p $enc -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($prev),
+            [$code] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($src)
+                . " -map 0:v:0 -map '0:a:0?' -vf $scale -pix_fmt yuv420p $enc -c:a aac -b:a 128k -movflags +faststart " . sh_arg($prev),
                 fn() => null, $cancelFlag, 1800);
             if ($code === 0 && is_file($prev) && filesize($prev) > 0) {
                 break;
@@ -240,8 +240,8 @@ function mproj_graph(array $p, array $clips, int $W, int $H, float $fps, array $
         $len = round($c['out'] - $c['in'], 3);
         $file = mproj_media_file($p['id'], $m);
         $inputs .= $m['kind'] === 'image'
-            ? sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $len, escapeshellarg($file))
-            : sprintf(' -ss %.3f -t %.3f -i %s', $c['in'], $len, escapeshellarg($file));
+            ? sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $len, sh_arg($file))
+            : sprintf(' -ss %.3f -t %.3f -i %s', $c['in'], $len, sh_arg($file));
         $fit = $c['fit'] ?? $p['fit'] ?? 'blur';
         if (!empty($c['tr'])) {
             // Ukuran & posisi pilihan: latar blur (atau hitam) + footage diperkecil/diperbesar di titik tengah tr (sama dengan editor)
@@ -302,8 +302,8 @@ function mproj_graph(array $p, array $clips, int $W, int $H, float $fps, array $
         }
         $file = mproj_media_file($p['id'], $m);
         $img = $m['kind'] === 'image';
-        $inputs .= $img ? sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $len, escapeshellarg($file))
-            : sprintf(' -ss %.3f -t %.3f -i %s', $q['in'], $len, escapeshellarg($file));
+        $inputs .= $img ? sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $len, sh_arg($file))
+            : sprintf(' -ss %.3f -t %.3f -i %s', $q['in'], $len, sh_arg($file));
         if (!$hide('pip')) {
             $ow = max(2, (int) (round($q['w'] * $W / 2) * 2));
             $parts[] = sprintf("[%d:v]scale=%d:-2:flags=lanczos,fps=%s,format=yuva420p,setpts=PTS-STARTPTS+%.3f/TB[q%d]", $idx, $ow, $fps, $q['s'], $k);
@@ -335,7 +335,7 @@ function mproj_graph(array $p, array $clips, int $W, int $H, float $fps, array $
         if (!is_file($file) || $e0 - $s0 < 0.05) {
             continue;
         }
-        $inputs .= sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $total, escapeshellarg($file));
+        $inputs .= sprintf(' -loop 1 -framerate %s -t %.3f -i %s', $fps, $total, sh_arg($file));
         $ow = max(2, (int) (round($o['w'] * $W / 2) * 2));
         $anim = $o['anim'] ?? null;
         [$din, $dout] = anim_durations($anim, $e0 - $s0);
@@ -373,7 +373,7 @@ function mproj_graph(array $p, array $clips, int $W, int $H, float $fps, array $
         if (!is_file($file) || $len <= 0.1) {
             continue;
         }
-        $inputs .= ' -i ' . escapeshellarg($file);
+        $inputs .= ' -i ' . sh_arg($file);
         $ms = (int) round($mu['s'] * 1000);
         $chain = sprintf('[%d:a]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume=%.3f',
             $idx, $mu['off'], $len, $mu['vol'] / 100);
@@ -441,8 +441,8 @@ function run_mproj_render(string $id, array $job, string $tmpDir, string $cancel
     $err = '';
     foreach ($encoders as $enc) {
         update_job($id, ['status' => 'converting', 'stage' => 'Menyusun ' . count($clips) . ' footage…', 'progress' => 0]);
-        [$code, $tail] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
-            . ' -/filter_complex ' . escapeshellarg($gfile) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart " . escapeshellarg($base),
+        [$code, $tail] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
+            . ' -/filter_complex ' . sh_arg($gfile) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart " . sh_arg($base),
             $progress(0, $upscale ? 45 : 99), $cancelFlag);
         clearstatcache();
         if ($ok = $code === 0 && is_file($base) && filesize($base) > 0) {
@@ -486,19 +486,19 @@ function mproj_upscale(string $id, string $base, string $out, int $bW, int $bH, 
     foreach (clip_encoders($mbps) as $enc) {
         if ($sr) {
             update_job($id, ['stage' => "AI upscale ke {$W}×{$H}…", 'progress' => 45]);
-            $pipe = escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . escapeshellarg($base)
+            $pipe = sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -i ' . sh_arg($base)
                 . " -vf scale=$iW:$iH:flags=area -f rawvideo -pix_fmt bgra - | $sr $iW $iH $W $H ll | "
-                . escapeshellarg(FFMPEG) . " -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -f rawvideo -pix_fmt bgra -s {$W}x{$H}"
-                . " -framerate $fps -i - -i " . escapeshellarg($base) . " -map 0:v -map '1:a?' -pix_fmt yuv420p $enc -c:a copy -shortest -movflags +faststart " . escapeshellarg($out);
-            [$code] = run('/bin/bash -c ' . escapeshellarg("set -o pipefail; $pipe"), $progress, $cancelFlag);
+                . sh_arg(FFMPEG) . " -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -f rawvideo -pix_fmt bgra -s {$W}x{$H}"
+                . " -framerate $fps -i - -i " . sh_arg($base) . " -map 0:v -map '1:a?' -pix_fmt yuv420p $enc -c:a copy -shortest -movflags +faststart " . sh_arg($out);
+            [$code] = run('/bin/bash -c ' . sh_arg("set -o pipefail; $pipe"), $progress, $cancelFlag);
             clearstatcache();
             if ($code === 0 && is_file($out) && filesize($out) > 0) {
                 return 'AI upscale';
             }
         }
         update_job($id, ['stage' => "Memperbesar ke {$W}×{$H}…", 'progress' => 45]);
-        [$code] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . escapeshellarg($base)
-            . " -vf scale=$W:$H:flags=lanczos+accurate_rnd+full_chroma_int,cas=0.4 -pix_fmt yuv420p $enc -c:a copy -movflags +faststart " . escapeshellarg($out),
+        [$code] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1 -i ' . sh_arg($base)
+            . " -vf scale=$W:$H:flags=lanczos+accurate_rnd+full_chroma_int,cas=0.4 -pix_fmt yuv420p $enc -c:a copy -movflags +faststart " . sh_arg($out),
             $progress, $cancelFlag);
         clearstatcache();
         if ($code === 0 && is_file($out) && filesize($out) > 0) {

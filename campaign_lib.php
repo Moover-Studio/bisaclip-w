@@ -115,7 +115,7 @@ function campaign_pub_dir(string $cid): string
 /** Info video: durasi, ukuran, fps, ada audio. */
 function cprobe(string $file): array
 {
-    $d = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -print_format json -show_streams -show_format ' . escapeshellarg($file)), true) ?: [];
+    $d = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -print_format json -show_streams -show_format ' . sh_arg($file)), true) ?: [];
     $info = ['duration' => (float) ($d['format']['duration'] ?? 0), 'width' => 0, 'height' => 0, 'fps' => 0, 'audio' => false];
     foreach ($d['streams'] ?? [] as $s) {
         if ($s['codec_type'] === 'video' && !$info['width']) {
@@ -136,8 +136,8 @@ function cprobe(string $file): array
 /** Thumbnail JPG dari detik $t ke $out (lebar $w). */
 function cthumb(string $src, float $t, string $out, int $w = 320): bool
 {
-    exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . sprintf('%.2f', max(0, $t)) . ' -i ' . escapeshellarg($src)
-        . " -frames:v 1 -vf scale=$w:-2 -q:v 4 " . escapeshellarg($out), $o, $code);
+    sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . sprintf('%.2f', max(0, $t)) . ' -i ' . sh_arg($src)
+        . " -frames:v 1 -vf scale=$w:-2 -q:v 4 " . sh_arg($out), $o, $code);
     @chmod($out, 0666);
     return $code === 0 && is_file($out);
 }
@@ -147,7 +147,7 @@ function cthumb(string $src, float $t, string $out, int $w = 320): bool
 /** Detik pergantian shot (deteksi scene ffmpeg). Ambang 0,15: tetap menangkap cut di adegan gelap (film horor / malam). */
 function campaign_shot_cuts(string $video): array
 {
-    $out = (string) shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -i ' . escapeshellarg($video)
+    $out = (string) sh_out(sh_arg(FFMPEG) . ' -hide_banner -nostdin -i ' . sh_arg($video)
         . " -an -vf \"scale=192:-2,select='gt(scene,0.15)',metadata=print:file=-\" -f null - 2>/dev/null");
     preg_match_all('/pts_time:([\d.]+)/', $out, $m);
     $cuts = [];
@@ -191,8 +191,8 @@ function campaign_speech(string $cid, array $f, string $tmpDir, string $cancelFl
     $lines = [];
     if (!empty($f['audio'])) {
         $wav = "$tmpDir/speech_{$f['fid']}.wav";
-        run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($src) . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le '
-            . escapeshellarg($wav), fn() => null, $cancelFlag, 300);
+        run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($src) . ' -vn -ac 1 -ar 16000 -c:a pcm_s16le '
+            . sh_arg($wav), fn() => null, $cancelFlag, 300);
         if (is_file($wav)) {
             try {
                 $lines = campaign_lines(whisper_words($wav, 'auto', $tmpDir, $cancelFlag));
@@ -391,9 +391,9 @@ function run_campaign_file(string $id, array $job, string $tmpDir, string $cance
     // Versi ringan untuk AI (360p): cepat diunggah, AI tetap melihat gambar & mendengar dialog
     $stage('Menyiapkan video untuk AI…', 15);
     $ai = "$tmpDir/ai.mp4";
-    [$code, $tail] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . escapeshellarg($src)
+    [$code, $tail] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -i ' . sh_arg($src)
         . " -map 0:v:0 -map '0:a:0?' -vf scale=-2:360,fps=24 -c:v libx264 -preset veryfast -crf 32 -pix_fmt yuv420p"
-        . ' -c:a aac -b:a 48k -ac 1 -movflags +faststart ' . escapeshellarg($ai), fn() => null, $cancelFlag, 900);
+        . ' -c:a aac -b:a 48k -ac 1 -movflags +faststart ' . sh_arg($ai), fn() => null, $cancelFlag, 900);
     if ($code !== 0 || !is_file($ai)) {
         throw new RuntimeException('Gagal menyiapkan video: ' . error_from($tail));
     }
@@ -761,7 +761,7 @@ function run_campaign_build(string $id, array $job, string $tmpDir, string $canc
         $f = $files[$s['fid']];
         $len = round($s['end'] - $s['start'], 3);
         $total += $len;
-        $inputs .= sprintf(' -ss %.3f -t %.3f -i %s', $s['start'], $len, escapeshellarg(cfile_media($c['id'], $f)));
+        $inputs .= sprintf(' -ss %.3f -t %.3f -i %s', $s['start'], $len, sh_arg(cfile_media($c['id'], $f)));
         $wide = $f['width'] / max(1, $f['height']) >= 1.6;
         $fit = $wide
             ? "scale=$W:$H:force_original_aspect_ratio=increase:flags=lanczos,crop=$W:$H"
@@ -789,8 +789,8 @@ function run_campaign_build(string $id, array $job, string $tmpDir, string $canc
     $ok = false;
     foreach (clip_encoders(24, 'max') as $enc) {
         update_job($id, ['stage' => 'Merakit ' . count($plan['segments']) . ' potongan footage…', 'progress' => 0]);
-        [$code, $tail] = run(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
-            . ' -/filter_complex ' . escapeshellarg($graph) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart " . escapeshellarg($out),
+        [$code, $tail] = run(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -nostats -progress pipe:1' . $inputs
+            . ' -/filter_complex ' . sh_arg($graph) . " -map '[v]' -map '[a]' $enc -c:a aac -b:a 320k -movflags +faststart " . sh_arg($out),
             function (string $line) use ($id, $total) {
                 if (str_starts_with($line, 'out_time_us=')) {
                     update_job($id, ['progress' => round(min(99, ((int) substr($line, 12)) / 1e6 / max(0.1, $total) * 100), 1)]);

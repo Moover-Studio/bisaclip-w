@@ -1,20 +1,23 @@
 <?php
 // Konfigurasi utama bisaclip (local only)
 
-define('APP_DIR', __DIR__);
-define('DOWNLOAD_DIR', APP_DIR . '/downloads');
-define('STORAGE_DIR', APP_DIR . '/storage');
-define('JOBS_DIR', STORAGE_DIR . '/jobs');
-define('TMP_DIR', STORAGE_DIR . '/tmp');
-
 /*
- * Platform: macOS (XAMPP + Homebrew) atau Linux / Windows lewat WSL2 (Apache + tools di /usr/local/bin).
+ * Platform: macOS (XAMPP + Homebrew), Linux / Windows lewat WSL2 (Apache + tools di /usr/local/bin),
+ * atau Windows asli (XAMPP for Windows + tools di storage/bin, perintah dijalankan lewat Git Bash; lihat install/setup-windows.ps1).
  * Apache berjalan sebagai user lain ("daemon" di Mac, "www-data" di Linux), jadi semua binary pakai path absolut.
  * Path bisa ditimpa lewat storage/tools.json, mis. {"ffmpeg": "/opt/ffmpeg/bin/ffmpeg"}.
  */
 define('IS_MAC', PHP_OS_FAMILY === 'Darwin');
+define('IS_WIN', PHP_OS_FAMILY === 'Windows');
 define('IS_WSL', PHP_OS_FAMILY === 'Linux' && stripos((string) @file_get_contents('/proc/version'), 'microsoft') !== false);
-define('BIN_DIR', IS_MAC ? '/opt/homebrew/bin' : '/usr/local/bin');
+
+// Windows: path memakai garis miring "/" (C:/xampp/htdocs/...) supaya aman dipakai di PHP, Git Bash, dan semua tool
+define('APP_DIR', IS_WIN ? str_replace('\\', '/', __DIR__) : __DIR__);
+define('DOWNLOAD_DIR', APP_DIR . '/downloads');
+define('STORAGE_DIR', APP_DIR . '/storage');
+define('JOBS_DIR', STORAGE_DIR . '/jobs');
+define('TMP_DIR', STORAGE_DIR . '/tmp');
+define('BIN_DIR', IS_MAC ? '/opt/homebrew/bin' : (IS_WIN ? STORAGE_DIR . '/bin' : '/usr/local/bin'));
 
 /** Path absolut sebuah tool: storage/tools.json → kandidat per platform → BIN_DIR. */
 function tool_path(string $name, array $candidates = []): string
@@ -24,12 +27,158 @@ function tool_path(string $name, array $candidates = []): string
     if (!empty($over[$name])) {
         return $over[$name];
     }
+    if (IS_WIN) {
+        foreach (array_merge($candidates, [BIN_DIR . "/$name.exe"]) as $c) {
+            if (is_file($c)) {
+                return $c;
+            }
+        }
+        return BIN_DIR . "/$name.exe";
+    }
     foreach (array_merge($candidates, [BIN_DIR . "/$name", "/usr/local/bin/$name", "/usr/bin/$name"]) as $c) {
         if (is_file($c)) {
             return $c;
         }
     }
     return BIN_DIR . "/$name";
+}
+
+/* ---------- Menjalankan perintah terminal di semua platform ----------
+ * Semua perintah ditulis dengan sintaks POSIX (sh). Mac / Linux: fungsi bawaan PHP apa adanya.
+ * Windows asli: perintah dijalankan lewat Git Bash (bash.exe dari Git for Windows) dari file skrip sementara,
+ * dan output dibaca lewat file (stream_select tidak bisa dipakai untuk pipe proses di Windows).
+ */
+define('BASH', IS_WIN ? tool_path('bash', [
+    'C:/Program Files/Git/bin/bash.exe',
+    str_replace('\\', '/', (string) getenv('LOCALAPPDATA')) . '/Programs/Git/bin/bash.exe',
+    'C:/Program Files (x86)/Git/bin/bash.exe',
+]) : '/bin/sh');
+if (IS_WIN) {
+    // Git Bash tidak boleh mengubah argumen yang mirip path POSIX (mis. "/xyz") jadi path Windows
+    putenv('MSYS_NO_PATHCONV=1');
+    putenv('MSYS2_ARG_CONV_EXCL=*');
+}
+
+/** Kutip satu argumen untuk shell POSIX (sama persis dengan escapeshellarg di Mac/Linux, juga dipakai di Windows lewat Git Bash). */
+function sh_arg(string $s): string
+{
+    return "'" . str_replace("'", "'\\''", $s) . "'";
+}
+
+/** Path file untuk ditulis di dalam filtergraph ffmpeg (movie=, ass=filename=, fontsdir=): "C:" di Windows harus di-escape. */
+function ff_path(string $p): string
+{
+    if (!IS_WIN) {
+        return $p;
+    }
+    $p = str_replace('\\', '/', $p);
+    return preg_match('/^[A-Za-z]:/', $p) ? $p[0] . '\\\\:' . substr($p, 2) : $p;
+}
+
+/**
+ * Windows: jalankan perintah sh lewat Git Bash. Output (stdout, atau stdout+stderr kalau $merge) ditulis ke file,
+ * $onChunk dipanggil untuk tiap potongan output baru, $stop() dicek berkala: kalau mengembalikan string tidak kosong,
+ * proses dihentikan. Mengembalikan [exit_code, alasan_berhenti|null].
+ */
+function win_run(string $cmd, ?callable $onChunk = null, ?callable $stop = null, bool $merge = false): array
+{
+    @mkdir(TMP_DIR, 0777, true);
+    $base = TMP_DIR . '/sh-' . getmypid() . '-' . bin2hex(random_bytes(5));
+    $script = "$base.sh";
+    $out = "$base.out";
+    file_put_contents($script, "{\n$cmd\n} > " . sh_arg($out) . ' 2>' . ($merge ? '&1' : '/dev/null') . "\n");
+    $proc = proc_open([BASH, '--noprofile', '--norc', $script],
+        [0 => ['file', 'NUL', 'r'], 1 => ['file', 'NUL', 'w'], 2 => ['file', 'NUL', 'w']], $pipes, null, null, ['bypass_shell' => true]);
+    if (!is_resource($proc)) {
+        @unlink($script);
+        return [1, null];
+    }
+    $pos = 0;
+    $fh = null;
+    $code = -1;
+    $stopped = null;
+    $read = function () use (&$fh, &$pos, $out, $onChunk) {
+        $fh = $fh ?: @fopen($out, 'rb');
+        if (!$fh) {
+            return;
+        }
+        fseek($fh, $pos);
+        $chunk = (string) stream_get_contents($fh);
+        if ($chunk !== '') {
+            $pos += strlen($chunk);
+            $onChunk && $onChunk($chunk);
+        }
+    };
+    while (true) {
+        $st = proc_get_status($proc);
+        $read();
+        if (!$st['running']) {
+            $code = (int) $st['exitcode'];
+            break;
+        }
+        if ($stop && ($why = $stop())) {
+            proc_kill($proc);
+            $stopped = $why;
+            break;
+        }
+        usleep($pos ? 150000 : 50000);
+    }
+    $read();
+    $fh && fclose($fh);
+    proc_close($proc);
+    @unlink($script);
+    @unlink($out);
+    return [$code, $stopped];
+}
+
+/** Pengganti shell_exec(): stdout perintah, atau null kalau kosong. */
+function sh_out(string $cmd): string|false|null
+{
+    if (!IS_WIN) {
+        return shell_exec($cmd);
+    }
+    $buf = '';
+    win_run($cmd, function ($c) use (&$buf) { $buf .= $c; });
+    return $buf === '' ? null : $buf;
+}
+
+/** Pengganti exec(): baris output ditambahkan ke $output, kode keluar di $code, mengembalikan baris terakhir. */
+function sh_exec(string $cmd, ?array &$output = null, ?int &$code = null): string|false
+{
+    if (!IS_WIN) {
+        return exec($cmd, $output, $code);
+    }
+    $buf = '';
+    [$code] = win_run($cmd, function ($c) use (&$buf) { $buf .= $c; });
+    $lines = $buf === '' ? [] : array_map('rtrim', preg_split('/\r?\n/', rtrim($buf, "\r\n")));
+    $output = array_merge(is_array($output) ? $output : [], $lines);
+    return $lines ? end($lines) : '';
+}
+
+/** Hentikan proses dari proc_open beserta semua anak prosesnya (Windows: taskkill satu pohon proses). */
+function proc_kill($proc, int $signal = 15): void
+{
+    if (!IS_WIN) {
+        proc_terminate($proc, $signal);
+        return;
+    }
+    $st = proc_get_status($proc);
+    if (!empty($st['pid'])) {
+        exec('taskkill /F /T /PID ' . (int) $st['pid'] . ' >NUL 2>&1');
+    }
+}
+
+/** Jalankan PHP CLI di latar belakang (worker), tidak ditunggu. Output ditambahkan ke $log. */
+function spawn_php(array $args, string $log): void
+{
+    if (!IS_WIN) {
+        // Tanpa nohup: di macOS nohup gagal saat dijalankan dari Apache (tidak ada terminal)
+        exec(implode(' ', array_map('sh_arg', array_merge([PHP_CLI], $args))) . ' < /dev/null >> ' . sh_arg($log) . ' 2>&1 &');
+        return;
+    }
+    // Tanpa pipe (supaya request tidak menunggu proses selesai) dan tanpa jendela konsol baru
+    proc_open(array_merge([PHP_CLI], $args), [0 => ['file', 'NUL', 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']],
+        $pipes, APP_DIR, null, ['bypass_shell' => true]);
 }
 
 define('YTDLP', tool_path('yt-dlp'));
@@ -42,9 +191,10 @@ define('FFMPEG_FULL', IS_MAC ? tool_path('ffmpeg-full', ['/opt/homebrew/opt/ffmp
 define('WHISPER_CLI', tool_path('whisper-cli'));
 define('WHISPER_MODEL', STORAGE_DIR . '/models/ggml-large-v3-turbo-q5_0.bin');
 // Python + OpenCV untuk deteksi wajah pembicara (crop vertikal otomatis)
-define('PYTHON', STORAGE_DIR . '/venv/bin/python');
+define('PYTHON', STORAGE_DIR . (IS_WIN ? '/venv/Scripts/python.exe' : '/venv/bin/python'));
 define('FACE_MODEL', STORAGE_DIR . '/models/face_detection_yunet.onnx');
-define('PHP_CLI', tool_path('php', IS_MAC ? ['/Applications/XAMPP/xamppfiles/bin/php'] : [PHP_BINDIR . '/php']));
+define('PHP_CLI', tool_path('php', IS_MAC ? ['/Applications/XAMPP/xamppfiles/bin/php']
+    : (IS_WIN ? [str_replace('\\', '/', PHP_BINDIR) . '/php.exe', 'C:/xampp/php/php.exe'] : [PHP_BINDIR . '/php'])));
 
 /*
  * Encoder hardware. Kode memakai argumen VideoToolbox (Mac) sebagai acuan; di Linux/WSL diterjemahkan ke NVENC
@@ -67,7 +217,7 @@ function hw_encoders(): array
         return $hw = $c;
     }
     $test = function (string $args): bool {
-        exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -f lavfi -i testsrc2=s=1280x720:r=30:d=0.3 -pix_fmt yuv420p '
+        sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -loglevel error -f lavfi -i testsrc2=s=1280x720:r=30:d=0.3 -pix_fmt yuv420p '
             . $args . ' -f null - 2>&1', $o, $code);
         return $code === 0;
     };
@@ -138,7 +288,13 @@ const MODES = [
 function setup_env(): void
 {
     // Environment untuk yt-dlp / deno / ffmpeg saat dijalankan sebagai user daemon
-    putenv('PATH=' . BIN_DIR . ':/usr/local/bin:/usr/bin:/bin' . (IS_MAC ? '' : ':/usr/lib/wsl/lib'));
+    if (IS_WIN) {
+        // Windows: tool di storage/bin didahulukan, PATH sistem (System32, driver GPU) tetap ada
+        putenv('PATH=' . str_replace('/', '\\', BIN_DIR) . ';' . getenv('PATH'));
+        putenv('PYTHONIOENCODING=utf-8');
+    } else {
+        putenv('PATH=' . BIN_DIR . ':/usr/local/bin:/usr/bin:/bin' . (IS_MAC ? '' : ':/usr/lib/wsl/lib'));
+    }
     putenv('HOME=' . STORAGE_DIR);
     putenv('XDG_CACHE_HOME=' . STORAGE_DIR . '/cache');
     putenv('DENO_DIR=' . STORAGE_DIR . '/deno');
@@ -237,6 +393,13 @@ function normalize_video_url(string $url): array
  */
 function run_with_timeout(string $cmd, int $seconds): array
 {
+    if (IS_WIN) {
+        $out = '';
+        $deadline = microtime(true) + $seconds;
+        [$code, $stopped] = win_run($cmd, function ($c) use (&$out) { $out .= $c; },
+            fn() => microtime(true) > $deadline ? 'timeout' : null, true);
+        return [$stopped ? 124 : $code, $out, (bool) $stopped];
+    }
     $proc = proc_open('exec ' . $cmd . ' 2>&1', [1 => ['pipe', 'w']], $pipes);
     if (!is_resource($proc)) {
         return [1, 'Gagal menjalankan proses', false];
@@ -259,7 +422,7 @@ function run_with_timeout(string $cmd, int $seconds): array
         }
         if (microtime(true) > $deadline) {
             $timedOut = true;
-            proc_terminate($proc, 9);
+            proc_kill($proc, 9);
             break;
         }
     }
@@ -295,7 +458,11 @@ function write_job(array $job): void
     $tmp = $path . '.' . getmypid() . '.tmp';
     file_put_contents($tmp, json_encode($job, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     @chmod($tmp, 0666);
-    rename($tmp, $path);
+    // Windows: rename gagal sesaat kalau file tujuan sedang dibaca proses lain (polling); coba lagi sebentar
+    for ($i = 0; !@rename($tmp, $path) && $i < 20; $i++) {
+        usleep(50000);
+    }
+    @unlink($tmp);
 }
 
 function update_job(string $id, array $changes): array

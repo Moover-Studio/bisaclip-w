@@ -204,8 +204,8 @@ function hook_tts(string $text, string $voice, string $cacheDir, string $cancelF
         $in = stripos($audio[1], 'l16') !== false
             ? '-f s16le -ar ' . (preg_match('/rate=(\d+)/', $audio[1], $r) ? $r[1] : 24000) . ' -ac 1 -i ' : '-i ';
         $trim = 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse';
-        exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error ' . $in . escapeshellarg($raw)
-            . " -af '$trim,aformat=sample_rates=48000:channel_layouts=stereo' " . escapeshellarg($out) . ' 2>&1', $tail, $code);
+        sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error ' . $in . sh_arg($raw)
+            . " -af '$trim,aformat=sample_rates=48000:channel_layouts=stereo' " . sh_arg($out) . ' 2>&1', $tail, $code);
         @unlink($raw);
         if ($code !== 0 || !is_file($out)) {
             @unlink($out);
@@ -215,7 +215,7 @@ function hook_tts(string $text, string $voice, string $cacheDir, string $cancelF
         @file_put_contents($meta, $said);
         @chmod($meta, 0666);
     }
-    $dur = (float) trim((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . escapeshellarg($out)));
+    $dur = (float) trim((string) sh_out(sh_arg(FFPROBE) . ' -v error -show_entries format=duration -of csv=p=0 ' . sh_arg($out)));
     return [$out, $dur, $said];
 }
 
@@ -224,7 +224,7 @@ function paper_assets(string $cancelFlag): array
 {
     $meta = PAPER_DIR . '/meta.txt';
     if (!is_file($meta)) {
-        [$code, $tail] = run(escapeshellarg(PYTHON) . ' ' . escapeshellarg(APP_DIR . '/tools/paper_tear.py') . ' --out ' . escapeshellarg(PAPER_DIR),
+        [$code, $tail] = run(sh_arg(PYTHON) . ' ' . sh_arg(APP_DIR . '/tools/paper_tear.py') . ' --out ' . sh_arg(PAPER_DIR),
             fn() => null, $cancelFlag, 300);
         if ($code !== 0 || !is_file($meta)) {
             throw new RuntimeException('Gagal membuat aset transisi kertas: ' . error_from($tail));

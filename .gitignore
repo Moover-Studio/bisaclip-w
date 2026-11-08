@@ -20,3 +20,6 @@
 # File library & paket (musik, SFX, preset, API key bawaan tim): dibagikan terpisah, tidak pernah masuk git
 *.tar.gz
 *.zip
+
+# Font sistem Windows yang disalin installer (tidak boleh didistribusikan)
+/assets/fonts/ariblk.ttf

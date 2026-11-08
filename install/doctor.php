@@ -6,6 +6,9 @@ if (PHP_SAPI !== 'cli') {
 }
 require __DIR__ . '/../config.php';
 require __DIR__ . '/../clip.php';
+if (IS_WIN && function_exists('sapi_windows_vt100_support')) {
+    @sapi_windows_vt100_support(STDOUT, true); // warna di konsol Windows
+}
 
 $bad = 0;
 $row = function (bool $ok, string $name, string $info, bool $optional = false) use (&$bad) {
@@ -14,22 +17,25 @@ $row = function (bool $ok, string $name, string $info, bool $optional = false) u
     }
     printf("  %s %-20s %s\n", $ok ? "\033[32m✓\033[0m" : ($optional ? "\033[33m-\033[0m" : "\033[31m✗\033[0m"), $name, $info);
 };
-$ver = fn(string $cmd) => trim((string) strtok((string) shell_exec($cmd . ' 2>&1'), "\n"));
+$ver = fn(string $cmd) => trim((string) strtok((string) sh_out($cmd . ' 2>&1'), "\n"));
 
-echo "\nBisaClip · " . (IS_MAC ? 'macOS' : (IS_WSL ? 'Windows (WSL2)' : PHP_OS_FAMILY)) . ' · PHP ' . PHP_VERSION . "\n\n";
-$row(is_executable(FFMPEG), 'ffmpeg', FFMPEG . ' · ' . $ver(escapeshellarg(FFMPEG) . ' -hide_banner -version'));
+echo "\nBisaClip · " . (IS_MAC ? 'macOS' : (IS_WIN ? 'Windows (XAMPP)' : (IS_WSL ? 'Windows (WSL2)' : PHP_OS_FAMILY))) . ' · PHP ' . PHP_VERSION . "\n\n";
+$row(is_executable(FFMPEG), 'ffmpeg', FFMPEG . ' · ' . $ver(sh_arg(FFMPEG) . ' -hide_banner -version'));
 $row(is_executable(FFPROBE), 'ffprobe', FFPROBE);
-$ass = str_contains((string) shell_exec(escapeshellarg(FFMPEG_FULL) . ' -hide_banner -filters 2>&1'), ' ass ');
+$ass = str_contains((string) sh_out(sh_arg(FFMPEG_FULL) . ' -hide_banner -filters 2>&1'), ' ass ');
 $row($ass, 'subtitle (libass)', $ass ? FFMPEG_FULL : 'ffmpeg tanpa libass: subtitle tidak bisa dibakar');
-$row(is_executable(YTDLP), 'yt-dlp', YTDLP . ' · ' . $ver(escapeshellarg(YTDLP) . ' --version'));
-$row(is_executable(BIN_DIR . '/deno') || is_executable('/usr/local/bin/deno'), 'deno', 'runtime JS untuk yt-dlp (YouTube)');
-exec(escapeshellarg(WHISPER_CLI) . ' -h 2>&1', $o, $wc);
+$row(is_executable(YTDLP), 'yt-dlp', YTDLP . ' · ' . $ver(sh_arg(YTDLP) . ' --version'));
+$row(is_file(tool_path('deno')) || is_executable('/usr/local/bin/deno'), 'deno', 'runtime JS untuk yt-dlp (YouTube)');
+sh_exec(sh_arg(WHISPER_CLI) . ' -h 2>&1', $o, $wc);
 $row(is_executable(WHISPER_CLI) && $wc === 0, 'whisper-cli', WHISPER_CLI . ($wc === 0 ? '' : ' (gagal dijalankan, cek library CUDA)'));
 $row(is_file(WHISPER_MODEL), 'model whisper', basename(WHISPER_MODEL));
-$cv = is_file(PYTHON) ? trim((string) shell_exec(escapeshellarg(PYTHON) . ' -c "import cv2;print(cv2.__version__)" 2>&1')) : '';
+$cv = is_file(PYTHON) ? trim((string) sh_out(sh_arg(PYTHON) . ' -c "import cv2;print(cv2.__version__)" 2>&1')) : '';
 $row(preg_match('/^\d+\./', $cv) === 1, 'python + opencv', $cv ?: PYTHON . ' tidak ada');
 $row(is_file(FACE_MODEL), 'model wajah', basename(FACE_MODEL));
 $row(is_executable(PHP_CLI), 'php (worker)', PHP_CLI);
+if (IS_WIN) {
+    $row(is_file(BASH), 'git bash', BASH . ' (menjalankan perintah ffmpeg/python)');
+}
 
 $hw = hw_encoders();
 $row($hw['kind'] !== 'none', 'encoder GPU', match ($hw['kind']) {
@@ -39,7 +45,7 @@ $row($hw['kind'] !== 'none', 'encoder GPU', match ($hw['kind']) {
 }, true);
 $sr = superres_cmd();
 if ($sr && !IS_MAC) {
-    $cuda = trim((string) shell_exec(escapeshellarg(PYTHON) . ' -c "import torch;print(torch.cuda.is_available())" 2>&1'));
+    $cuda = trim((string) sh_out(sh_arg(PYTHON) . ' -c "import torch;print(torch.cuda.is_available())" 2>&1'));
     $sr = $cuda === 'True' ? $sr : null;
 }
 $row((bool) $sr, 'AI upscale 2K', $sr ? (IS_MAC ? 'Apple super-resolution' : 'Real-ESRGAN (GPU)') : 'tidak tersedia: scaling biasa', true);

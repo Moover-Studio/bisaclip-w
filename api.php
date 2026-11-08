@@ -33,10 +33,7 @@ function require_video_url(string $url): string
 
 function spawn_worker(string $id): void
 {
-    // Tanpa nohup: di macOS nohup gagal saat dijalankan dari Apache (tidak ada terminal)
-    $log = STORAGE_DIR . '/worker.log';
-    exec(escapeshellarg(PHP_CLI) . ' ' . escapeshellarg(APP_DIR . '/worker.php') . ' ' . escapeshellarg($id)
-        . ' < /dev/null >> ' . escapeshellarg($log) . ' 2>&1 &');
+    spawn_php([APP_DIR . '/worker.php', $id], STORAGE_DIR . '/worker.log');
 }
 
 const CLIP_LAYOUT_LABELS = [
@@ -343,8 +340,8 @@ function clip_thumb_file(array $job): ?string
         @mkdir(THUMB_DIR, 0777, true);
         @chmod(THUMB_DIR, 0777);
     }
-    shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -loglevel error -y -ss 1 -i ' . escapeshellarg($file)
-        . ' -frames:v 1 -vf scale=540:-2 -q:v 4 ' . escapeshellarg($thumb));
+    sh_out(sh_arg(FFMPEG) . ' -hide_banner -loglevel error -y -ss 1 -i ' . sh_arg($file)
+        . ' -frames:v 1 -vf scale=540:-2 -q:v 4 ' . sh_arg($thumb));
     @chmod($thumb, 0666);
     return is_file($thumb) ? $thumb : null;
 }
@@ -807,8 +804,8 @@ function save_video_upload(): array
     if (!$ext) {
         respond(['error' => 'Format video harus MP4, MOV, atau WEBM.'], 400);
     }
-    $info = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height'
-        . ' -show_entries format=duration -of json ' . escapeshellarg($f['tmp_name'])), true) ?: [];
+    $info = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams v:0 -show_entries stream=width,height'
+        . ' -show_entries format=duration -of json ' . sh_arg($f['tmp_name'])), true) ?: [];
     $w = (int) ($info['streams'][0]['width'] ?? 0);
     $h = (int) ($info['streams'][0]['height'] ?? 0);
     $dur = round((float) ($info['format']['duration'] ?? 0), 3);
@@ -830,8 +827,8 @@ function save_video_upload(): array
     @chmod($dest, 0666);
     $thumb = OVERLAY_DIR . "/$sha.thumb.jpg";
     if (!is_file($thumb)) {
-        shell_exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . min(0.5, $dur / 2) . ' -i ' . escapeshellarg($dest)
-            . ' -frames:v 1 -vf scale=320:-2 ' . escapeshellarg($thumb));
+        sh_out(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . min(0.5, $dur / 2) . ' -i ' . sh_arg($dest)
+            . ' -frames:v 1 -vf scale=320:-2 ' . sh_arg($thumb));
         @chmod($thumb, 0666);
     }
     return ["$sha.$ext", $w, $h, $dur];
@@ -853,8 +850,8 @@ function save_music_upload(): array
     if (!in_array($ext, ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac'], true)) {
         respond(['error' => 'Format musik harus MP3, M4A, AAC, WAV, OGG, atau FLAC.'], 400);
     }
-    $info = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams a:0 -show_entries stream=codec_type'
-        . ' -show_entries format=duration -of json ' . escapeshellarg($f['tmp_name'])), true) ?: [];
+    $info = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams a:0 -show_entries stream=codec_type'
+        . ' -show_entries format=duration -of json ' . sh_arg($f['tmp_name'])), true) ?: [];
     $dur = round((float) ($info['format']['duration'] ?? 0), 3);
     if (($info['streams'][0]['codec_type'] ?? '') !== 'audio' || $dur < 1) {
         respond(['error' => 'File musik tidak bisa dibaca.'], 400);
@@ -935,8 +932,8 @@ switch ($action) {
         $url = trim((string) (input()['url'] ?? ''));
         $url = require_video_url($url);
 
-        $cmd = escapeshellarg(YTDLP) . ' --dump-single-json --no-playlist --no-warnings --socket-timeout 20 -- '
-            . escapeshellarg($url);
+        $cmd = sh_arg(YTDLP) . ' --dump-single-json --no-playlist --no-warnings --socket-timeout 20 -- '
+            . sh_arg($url);
         [$code, $raw, $timedOut] = run_with_timeout($cmd, 60);
         if ($timedOut) {
             respond(['error' => 'Waktu habis (60 detik) saat membaca video. Periksa koneksi internet lalu coba lagi.'], 504);
@@ -1558,7 +1555,7 @@ switch ($action) {
         if ($key === '') {
             @unlink($file);
         } elseif (@file_put_contents($file, $key . "\n", LOCK_EX) === false) {
-            respond(['error' => 'Gagal menyimpan key: folder storage tidak bisa ditulis. Jalankan ulang "Install BisaClip.bat".'], 500);
+            respond(['error' => 'Gagal menyimpan key: folder storage tidak bisa ditulis. Jalankan ulang Install BisaClip.bat.'], 500);
         }
         respond(['ok' => true]);
 
@@ -1773,8 +1770,8 @@ switch ($action) {
         $out = "$dir/frame_" . md5($item['iid'] . '|' . $t . '|' . ($src ? 'src' : 'proxy')) . '.jpg';
         if (!is_file($out)) {
             [$file, $at] = $src ? [$src['path'], $t - $src['shift']] : [APP_DIR . '/' . proxy_rel($project['id'], $item['iid']), $t - $p0];
-            exec(escapeshellarg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format(max(0, $at), 3, '.', '') . ' -i ' . escapeshellarg($file)
-                . ' -frames:v 1 -q:v 2 ' . escapeshellarg($out) . ' 2>&1', $tail, $code);
+            sh_exec(sh_arg(FFMPEG) . ' -hide_banner -nostdin -y -loglevel error -ss ' . number_format(max(0, $at), 3, '.', '') . ' -i ' . sh_arg($file)
+                . ' -frames:v 1 -q:v 2 ' . sh_arg($out) . ' 2>&1', $tail, $code);
             if ($code !== 0 || !is_file($out)) {
                 respond(['error' => 'Gagal mengambil frame clip.'], 500);
             }
@@ -1969,8 +1966,8 @@ switch ($action) {
         if (!in_array($ext, ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac'], true)) {
             respond(['error' => 'Format sound effect harus MP3, M4A, AAC, WAV, OGG, atau FLAC.'], 400);
         }
-        $info = json_decode((string) shell_exec(escapeshellarg(FFPROBE) . ' -v error -select_streams a:0 -show_entries stream=codec_type'
-            . ' -show_entries format=duration -of json ' . escapeshellarg($f['tmp_name'])), true) ?: [];
+        $info = json_decode((string) sh_out(sh_arg(FFPROBE) . ' -v error -select_streams a:0 -show_entries stream=codec_type'
+            . ' -show_entries format=duration -of json ' . sh_arg($f['tmp_name'])), true) ?: [];
         $dur = round((float) ($info['format']['duration'] ?? 0), 3);
         if (($info['streams'][0]['codec_type'] ?? '') !== 'audio' || $dur < 0.02) {
             respond(['error' => 'File sound effect tidak bisa dibaca.'], 400);
