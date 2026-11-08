@@ -54,7 +54,7 @@ Yang dipasang otomatis:
 - **Ke dalam `storage\bin`:** ffmpeg, yt-dlp, deno, dan whisper.
 - **Python 3.12 + OpenCV:** dipasang ke `storage\venv`, plus PyTorch kalau ada NVIDIA.
 - **Model AI, font Arial Black, dan library tim** (kalau file library ada).
-- **Ikon di Desktop:** **BisaClip** dan **Hasil BisaClip**.
+- **Ikon di Desktop:** **BisaClip**, **Hasil BisaClip**, dan **Update BisaClip**.
 
 ### 5. Nyalakan Apache
 
@@ -74,12 +74,28 @@ Kompresi clip otomatis **H.264** supaya bisa diputar dan diedit di Windows. Peng
 
 ## Update ke versi terbaru
 
+Klik dua kali ikon **Update BisaClip** di Desktop, atau file **Update BisaClip.bat** di folder aplikasi. Selesai.
+
+Ini padanan `bash install/update-mac.sh` di Mac. Yang dikerjakan:
+
+1. **Cek proses berjalan.** Kalau masih ada unduh, analisa, atau render yang berjalan, kamu ditanya dulu.
+2. **Cadangkan pengaturan.** Preset, daftar musik, API key, dan pengaturan disalin ke `%USERPROFILE%\BisaClip-backup\` (10 cadangan terakhir).
+3. **Ambil kode terbaru dari GitHub.** Daftar **"Yang baru"** ditampilkan.
+4. **Pasang kebutuhan baru kalau ada.** yt-dlp juga diperbarui supaya download YouTube tetap lancar, lalu sistem dicek.
+
+Yang **tidak** disentuh: preset, musik, SFX, API key, room, project, dan hasil render. Semuanya ada di `storage`, `previews`, dan `downloads`, yang tidak dilacak git.
+
+Hal lain yang perlu diketahui:
+- **Perubahan kode di laptop tidak hilang.** Kalau ada, perubahan itu disimpan dulu (`git stash list`), lalu kode disamakan dengan GitHub.
+- **Library tim terbaru** (musik, SFX, preset baru dari admin): taruh `bisaclip-library.tar.gz` di Downloads, lalu jalankan `"Update BisaClip.bat" -WithLibrary` dari Command Prompt di folder aplikasi. Bisa juga dengan klik **Install BisaClip.bat**.
+- **Restart Apache tidak perlu.** Perubahan langsung aktif. Cukup muat ulang halaman BisaClip di browser.
+
+Lewat terminal juga bisa:
+
 ```powershell
 cd C:\xampp\htdocs\bisaclip-w
-git pull
+.\"Update BisaClip.bat"
 ```
-
-Lalu klik dua kali **Install BisaClip.bat** lagi. Installer memasang kebutuhan baru kalau ada dan memperbarui yt-dlp. Data tidak disentuh, termasuk preset, musik, project, API key, dan hasil render, karena semuanya ada di `storage`, `previews`, dan `downloads`, yang tidak dilacak git.
 
 ---
 

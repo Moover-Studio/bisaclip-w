@@ -1,9 +1,10 @@
 # Pasang semua kebutuhan BisaClip di Windows 10/11 dengan XAMPP for Windows (tanpa WSL).
 # Dijalankan oleh "Install BisaClip.bat" di folder aplikasi (mis. C:\xampp\htdocs\bisaclip-w).
 # Aman dijalankan ulang (juga setelah git pull): yang sudah ada dilewati, yt-dlp selalu diperbarui, data tidak disentuh.
-# Opsi: -NoCuda  jangan pakai GPU NVIDIA untuk whisper & AI upscale.
+# Opsi: -NoCuda     jangan pakai GPU NVIDIA untuk whisper & AI upscale.
+#       -NoLibrary  lewati pemasangan file library tim (dipakai oleh install\update-windows.ps1)
 # Catatan: file ini sengaja hanya berisi karakter ASCII (Windows PowerShell 5.1 membaca file tanpa BOM sebagai ANSI).
-param([switch]$NoCuda)
+param([switch]$NoCuda, [switch]$NoLibrary)
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
@@ -171,7 +172,7 @@ $ab = "$env:WINDIR\Fonts\ariblk.ttf"
 if ((Test-Path $ab) -and -not (Test-Path "$App\assets\fonts\ariblk.ttf")) { Copy-Item $ab "$App\assets\fonts\ariblk.ttf" }
 
 # ---------- 10. Library tim (musik, SFX, preset, key Gemini bawaan) ----------
-$Lib = @("$App\bisaclip-library.tar.gz", "$env:USERPROFILE\Downloads\bisaclip-library.tar.gz", ([Environment]::GetFolderPath('Desktop') + '\bisaclip-library.tar.gz')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$Lib = if ($NoLibrary) { $null } else { @("$App\bisaclip-library.tar.gz", "$env:USERPROFILE\Downloads\bisaclip-library.tar.gz", ([Environment]::GetFolderPath('Desktop') + '\bisaclip-library.tar.gz')) | Where-Object { Test-Path $_ } | Select-Object -First 1 }
 if ($Lib) {
     Say "Memasang library tim dari $Lib..."
     New-Item -ItemType Directory -Force "$Tmp\lib" | Out-Null
@@ -185,6 +186,8 @@ if ($Lib) {
     }
     & $Php "$App\install\merge-library.php" "$Tmp\lib" $App
     Ok 'Library terpasang'
+} elseif ($NoLibrary) {
+    Ok 'Library tim dilewati (update): musik, SFX & preset di laptop ini tetap'
 } else {
     Warn 'File bisaclip-library.tar.gz tidak ditemukan (Downloads / Desktop): musik, SFX & preset mulai kosong, API key Gemini diisi di Pengaturan.'
 }
@@ -205,8 +208,10 @@ Set-Content -Path "$desk\BisaClip.url" -Value "[InternetShortcut]`r`nURL=$url`r`
 try {
     $sh = New-Object -ComObject WScript.Shell
     $lnk = $sh.CreateShortcut("$desk\Hasil BisaClip.lnk"); $lnk.TargetPath = "$App\downloads"; $lnk.Save()
+    $lnk = $sh.CreateShortcut("$desk\Update BisaClip.lnk"); $lnk.TargetPath = "$App\Update BisaClip.bat"; $lnk.WorkingDirectory = $App
+    $lnk.IconLocation = "$env:WINDIR\System32\shell32.dll,238"; $lnk.Save()
 } catch { }
-Ok "Ikon Desktop: BisaClip ($url) dan Hasil BisaClip"
+Ok "Ikon Desktop: BisaClip ($url), Hasil BisaClip, Update BisaClip"
 
 # ---------- 12. Cek akhir ----------
 Say 'Cek sistem'
