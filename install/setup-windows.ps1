@@ -99,26 +99,50 @@ Ok ('deno ' + ((& "$Bin\deno.exe" --version | Select-Object -First 1) -replace '
 
 # ---------- 6. whisper.cpp (transkrip subtitle) ----------
 Say 'Memasang whisper (transkrip)...'
-function Test-Whisper { if (-not (Test-Path "$Bin\whisper-cli.exe")) { return $false }; & "$Bin\whisper-cli.exe" -h *> $null; return ($LASTEXITCODE -eq 0) }
+# Versi dikunci: rilis whisper.cpp terbaru kadang tidak menyertakan file Windows (dan nama filenya pernah berganti)
+$WhisperVer = 'v1.9.2'
+$script:WhisperCode = $null
+function Test-Whisper {
+    if (-not (Test-Path "$Bin\whisper-cli.exe")) { $script:WhisperCode = 'tidak ada'; return $false }
+    & "$Bin\whisper-cli.exe" -h *> $null
+    $script:WhisperCode = $LASTEXITCODE
+    return ($LASTEXITCODE -eq 0)
+}
+# whisper-cli butuh Microsoft Visual C++ Runtime (sering belum ada di Windows baru)
+function Install-VcRedist {
+    if ((Test-Path "$env:WINDIR\System32\msvcp140.dll") -and (Test-Path "$env:WINDIR\System32\vcruntime140_1.dll")) { return }
+    Warn 'Memasang Microsoft Visual C++ Runtime (kalau muncul jendela izin Administrator, klik Yes)...'
+    if (-not (Fetch 'https://aka.ms/vs/17/release/vc_redist.x64.exe' "$Tmp\vc_redist.x64.exe" -Quiet)) { Warn 'Gagal mengunduh Visual C++ Runtime.'; return }
+    $p = Start-Process -FilePath "$Tmp\vc_redist.x64.exe" -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait -PassThru
+    if ($p.ExitCode -in 0, 1638, 3010) { Ok 'Visual C++ Runtime' } else { Warn "Visual C++ Runtime gagal dipasang (kode $($p.ExitCode))." }
+}
+Install-VcRedist
 if (-not (Test-Whisper)) {
-    $rel = Invoke-RestMethod -UseBasicParsing 'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest'
-    $assets = @($rel.assets)
     $pick = @()
-    if ($Gpu) { $pick += $assets | Where-Object { $_.name -match '^whisper-cublas-.*-bin-x64\.zip$' } | Sort-Object name -Descending | Select-Object -First 1 }
-    $pick += $assets | Where-Object { $_.name -eq 'whisper-bin-x64.zip' } | Select-Object -First 1
-    foreach ($a in $pick) {
-        if (-not $a) { continue }
-        Write-Host "    mengunduh $($a.name)..."
-        if (-not (Fetch $a.browser_download_url "$Tmp\w.zip")) { continue }
+    if ($Gpu) { $pick += 'whisper-cublas-12.4.0-bin-x64.zip' }
+    $pick += 'whisper-bin-x64.zip'
+    foreach ($name in $pick) {
+        Write-Host "    mengunduh $name ($WhisperVer)..."
+        if (-not (Fetch "https://github.com/ggml-org/whisper.cpp/releases/download/$WhisperVer/$name" "$Tmp\w.zip")) { Warn "Gagal mengunduh $name."; continue }
         Remove-Item -Recurse -Force "$Tmp\w" -ErrorAction SilentlyContinue
         Expand-Archive -Force "$Tmp\w.zip" "$Tmp\w"
-        Get-ChildItem -Recurse "$Tmp\w" -Include *.exe, *.dll | Copy-Item -Destination $Bin -Force
+        # Sisa versi lain (mis. DLL CUDA) dibersihkan dulu supaya tidak tercampur
+        Get-ChildItem $Bin -Include 'whisper*', 'ggml*', 'cublas*', 'cudart*', 'nvblas*', 'nvrtc*', 'SDL2.dll' -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Recurse "$Tmp\w" | Where-Object { $_.Name -eq 'whisper-cli.exe' -or $_.Extension -eq '.dll' } | Copy-Item -Destination $Bin -Force
         if (Test-Whisper) { break }
-        Warn "$($a.name) tidak bisa dijalankan di laptop ini, mencoba versi lain..."
+        Warn "$name tidak bisa dijalankan di laptop ini (kode $script:WhisperCode), mencoba versi lain..."
     }
 }
-if (-not (Test-Whisper)) { Fail 'whisper-cli gagal dipasang. Periksa internet lalu coba lagi.' }
-Ok 'whisper-cli'
+if (-not (Test-Whisper)) {
+    $why = switch ($script:WhisperCode) {
+        -1073741515 { 'ada DLL yang tidak ditemukan (biasanya Microsoft Visual C++ Runtime). Pasang dari https://aka.ms/vs/17/release/vc_redist.x64.exe lalu jalankan ini lagi.' }
+        -1073741795 { 'CPU laptop ini tidak didukung build whisper (instruksi CPU tidak tersedia).' }
+        'tidak ada' { 'file whisper-cli.exe tidak ada setelah diunduh (kemungkinan diblokir antivirus: cek Windows Security > Protection history).' }
+        default { "whisper-cli.exe gagal dijalankan (kode $script:WhisperCode)." }
+    }
+    Fail "whisper-cli gagal dipasang: $why"
+}
+Ok "whisper-cli ($WhisperVer)"
 
 # ---------- 7. Python + OpenCV (deteksi wajah, split screen) ----------
 Say 'Menyiapkan Python...'
