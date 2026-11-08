@@ -94,7 +94,7 @@ Lewat terminal juga bisa:
 
 ```powershell
 cd C:\xampp\htdocs\bisaclip-w
-.\"Update BisaClip.bat"
+& ".\Update BisaClip.bat"
 ```
 
 ---
