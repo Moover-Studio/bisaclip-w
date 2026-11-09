@@ -60,6 +60,43 @@ if (IS_WIN) {
 }
 
 /** Kutip satu argumen untuk shell POSIX (sama persis dengan escapeshellarg di Mac/Linux, juga dipakai di Windows lewat Git Bash). */
+/**
+ * curl_init + sertifikat CA. XAMPP Windows sering tidak punya curl.cainfo di php.ini sehingga semua
+ * HTTPS (Gemini, ElevenLabs) gagal "SSL certificate problem". Fallback: bundle CA dari XAMPP atau Git for Windows.
+ */
+function http_init(string $url)
+{
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('Ekstensi PHP curl belum aktif: buka php.ini XAMPP, hapus ; di depan extension=curl, lalu restart Apache.');
+    }
+    $ch = curl_init($url);
+    if (IS_WIN && $ca = http_ca_file()) {
+        curl_setopt($ch, CURLOPT_CAINFO, $ca);
+    }
+    return $ch;
+}
+
+function http_ca_file(): string
+{
+    static $ca = null;
+    if ($ca !== null) {
+        return $ca;
+    }
+    $ini = (string) ini_get('curl.cainfo');
+    if ($ini !== '' && is_file($ini)) {
+        return $ca = '';
+    }
+    $xampp = dirname(PHP_BINDIR);
+    foreach ([STORAGE_DIR . '/cacert.pem', $xampp . '/apache/bin/curl-ca-bundle.crt', 'C:/xampp/apache/bin/curl-ca-bundle.crt',
+        dirname(BASH, 2) . '/mingw64/etc/ssl/certs/ca-bundle.crt', dirname(BASH, 2) . '/mingw64/ssl/certs/ca-bundle.crt',
+        'C:/Program Files/Git/mingw64/etc/ssl/certs/ca-bundle.crt'] as $f) {
+        if (is_file($f)) {
+            return $ca = $f;
+        }
+    }
+    return $ca = '';
+}
+
 function sh_arg(string $s): string
 {
     return "'" . str_replace("'", "'\\''", $s) . "'";

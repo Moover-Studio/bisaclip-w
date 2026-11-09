@@ -1,4 +1,26 @@
 <?php
+// Respons API harus selalu JSON. XAMPP (terutama Windows) menyalakan display_errors, sehingga warning PHP
+// ikut tercetak sebagai HTML dan browser hanya menampilkan "Respons server tidak valid".
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+ini_set('error_log', __DIR__ . '/storage/php-error.log');
+ob_start();
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if (!$e || !in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        return;
+    }
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    $msg = preg_replace('/^Uncaught \w+: /', '', strtok($e['message'], "\n"));
+    echo json_encode(['error' => 'Error server: ' . $msg . ' (' . basename($e['file']) . ':' . $e['line'] . ')'],
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+});
 require __DIR__ . '/config.php';
 require_once __DIR__ . '/editor_lib.php';
 require_once __DIR__ . '/source.php';
@@ -11,8 +33,11 @@ header('Content-Type: application/json; charset=utf-8');
 
 function respond(array $data, int $code = 200): void
 {
+    while (ob_get_level()) {
+        ob_end_clean(); // buang warning / output nyasar supaya JSON tetap bersih
+    }
     http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
 }
 
@@ -1266,6 +1291,9 @@ switch ($action) {
                 $path = make_frame($id, $an['video']['url'], $t);
                 header('Content-Type: image/jpeg');
                 header('Cache-Control: max-age=31536000, immutable');
+                while (ob_get_level()) {
+                    ob_end_clean();
+                }
                 readfile($path);
                 exit;
             }
@@ -1539,13 +1567,16 @@ switch ($action) {
             [$url, $hdr] = $name === 'gemini'
                 ? [GEMINI_BASE . '/v1beta/models?pageSize=1', 'x-goog-api-key: ' . $key]
                 : ['https://api.elevenlabs.io/v1/user/subscription', 'xi-api-key: ' . $key];
-            $ch = curl_init($url);
+            $ch = http_init($url);
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => [$hdr], CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]);
             $ok = curl_exec($ch) !== false;
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $cerr = curl_error($ch);
             curl_close($ch);
             if (!$ok) {
-                respond(['error' => 'Tidak bisa menghubungi server untuk mengecek key. Periksa internet lalu coba lagi.'], 400);
+                respond(['error' => stripos($cerr, 'SSL') !== false || stripos($cerr, 'certificate') !== false
+                    ? 'Sertifikat SSL tidak ditemukan di PHP XAMPP (' . $cerr . '). Jalankan ulang Install BisaClip.bat lalu restart Apache.'
+                    : 'Tidak bisa menghubungi server untuk mengecek key (' . $cerr . '). Periksa internet lalu coba lagi.'], 400);
             }
             if (in_array($code, [400, 401, 403], true)) {
                 respond(['error' => 'API key ditolak server. Pastikan key yang disalin benar dan masih aktif.'], 400);
@@ -1667,6 +1698,9 @@ switch ($action) {
         }
         header('Content-Type: image/jpeg');
         header('Cache-Control: max-age=31536000, immutable');
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
         readfile($thumb);
         exit;
 
@@ -1780,6 +1814,9 @@ switch ($action) {
         header('Content-Type: image/jpeg');
         header('Content-Length: ' . filesize($out));
         header('Cache-Control: private, max-age=86400');
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
         readfile($out);
         exit;
 
@@ -1796,6 +1833,9 @@ switch ($action) {
         header('Content-Type: audio/wav');
         header('Content-Length: ' . filesize($path));
         header('Cache-Control: private, max-age=86400');
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
         readfile($path);
         exit;
 

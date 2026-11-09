@@ -79,7 +79,13 @@ async function api(action, body, query = '') {
   } finally {
     clearTimeout(timer);
   }
-  const data = await res.json().catch(() => ({ error: 'Respons server tidak valid.' }));
+  const raw = await res.text();
+  let data;
+  try { data = JSON.parse(raw); } catch {
+    // Bukan JSON (mis. error PHP berbentuk HTML): tampilkan potongan teksnya supaya penyebabnya kelihatan
+    const txt = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+    data = { error: `Respons server tidak valid (HTTP ${res.status})${txt ? ': ' + txt : '.'}` };
+  }
   if (!res.ok || data.error) throw new Error(data.error || 'Terjadi kesalahan.');
   return data;
 }

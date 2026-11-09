@@ -51,7 +51,7 @@ function id_holidays(bool $refresh = false): array
         // Gagal mengambil tidak dicoba ulang terus-menerus: tunggu 6 jam sebelum mencoba lagi
         $retryOk = !is_array($cache) || time() - ($cache['tried_at'] ?? 0) > 6 * 3600 || $refresh;
         if ($retryOk) {
-            $ch = curl_init(HOLIDAY_ICS);
+            $ch = http_init(HOLIDAY_ICS);
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_FOLLOWLOCATION => true]);
             $ics = curl_exec($ch);
             $ok = is_string($ics) && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;

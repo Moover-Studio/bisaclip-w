@@ -1631,7 +1631,7 @@ function sfx_generate_ai(string $text, ?float $dur, string $name, string $tag = 
         throw new RuntimeException('API key ElevenLabs belum diatur.');
     }
     $body = ['text' => $text, 'prompt_influence' => 0.5] + ($dur ? ['duration_seconds' => max(0.5, min(22, $dur))] : []);
-    $ch = curl_init('https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128');
+    $ch = http_init('https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128');
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_UNICODE),

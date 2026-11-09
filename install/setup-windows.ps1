@@ -91,6 +91,10 @@ if (-not (Fetch 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dl
     if (Test-Path "$Bin\yt-dlp.exe") { Warn 'Gagal memperbarui yt-dlp, memakai versi yang ada.' } else { Fail 'Gagal mengunduh yt-dlp.' }
 }
 Ok ('yt-dlp ' + (& "$Bin\yt-dlp.exe" --version))
+# Sertifikat CA untuk HTTPS dari PHP (Gemini, ElevenLabs). XAMPP sering tidak mengisi curl.cainfo di php.ini.
+if (Fetch 'https://curl.se/ca/cacert.pem' "$App\storage\cacert.pem" -Quiet) { Ok 'Sertifikat CA (storage\cacert.pem)' }
+elseif (Test-Path "$App\storage\cacert.pem") { Warn 'Gagal memperbarui sertifikat CA, memakai yang ada.' }
+else { Warn 'Gagal mengunduh sertifikat CA. Kalau simpan API key gagal karena SSL, jalankan installer ini lagi.' }
 if (-not (Test-Path "$Bin\deno.exe")) {
     if (-not (Fetch 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' "$Tmp\deno.zip" -Quiet)) { Fail 'Gagal mengunduh deno.' }
     Expand-Archive -Force "$Tmp\deno.zip" $Bin

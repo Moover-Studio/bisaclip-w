@@ -69,7 +69,7 @@ function gemini_429_info(?array $res): array
 function gemini_http(string $method, string $url, array $headers, ?string $body, string $cancelFlag = '', int $timeout = 600): array
 {
     $respHeaders = [];
-    $ch = curl_init($url);
+    $ch = http_init($url);
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_RETURNTRANSFER => true,
