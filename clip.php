@@ -73,7 +73,7 @@ function clip_inputs(array $video, ?array $audio, float $start): array
         foreach ($f['http_headers'] ?? [] as $k => $v) {
             $headers .= "$k: $v\r\n";
         }
-        $local = str_starts_with($f['url'], '/');
+        $local = !preg_match('#^https?://#i', $f['url']); // file lokal: /... (Mac/Linux) atau C:/... (Windows)
         // Potongan sumber lokal: posisi dihitung dari awal potongan
         $inputs .= ' -ss ' . number_format(max(0, $start - (float) ($f['shift'] ?? 0)), 3, '.', '')
             . ($headers && !$local ? ' -headers ' . sh_arg($headers) : '')
