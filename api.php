@@ -1534,6 +1534,11 @@ switch ($action) {
         }
         respond(['overrides' => set_day_override($date, $mode)]);
 
+    case 'health':
+        // Dipakai installer Windows: ekstensi PHP yang aktif di Apache (bisa beda dengan PHP CLI)
+        respond(['php' => PHP_VERSION, 'ini' => (string) php_ini_loaded_file(),
+            'missing' => array_values(array_filter(['curl', 'mbstring', 'openssl', 'fileinfo', 'gd'], fn($x) => !extension_loaded($x)))]);
+
     case 'settings':
         respond(['settings' => read_settings(), 'codecs' => CLIP_CODECS]);
 

@@ -44,10 +44,34 @@ if (-not $Php) { Fail 'XAMPP belum terpasang. Pasang XAMPP for Windows (apachefr
 $phpVer = (& $Php -r 'echo PHP_VERSION;')
 if ([version]($phpVer -replace '[^0-9.].*$', '') -lt [version]'8.1') { Fail "PHP $phpVer terlalu lama. Pasang XAMPP versi terbaru (PHP 8.2 ke atas)." }
 Ok "PHP $phpVer ($Php)"
+# Ekstensi PHP yang dipakai BisaClip. Yang belum aktif dinyalakan otomatis di php.ini (cadangan: php.ini.bisaclip-bak).
+$Exts = @('curl', 'mbstring', 'openssl', 'fileinfo', 'gd')
+$PhpIni = Join-Path (Split-Path $Php) 'php.ini'
 $mods = (& $Php -m) -join ' '
-foreach ($x in @('curl', 'mbstring', 'openssl', 'json')) {
-    if ($mods -notmatch "(?i)\b$x\b") { Warn "Ekstensi PHP '$x' belum aktif: buka C:\xampp\php\php.ini, hapus tanda ; di depan extension=$x, lalu restart Apache." }
-}
+$missing = @($Exts | Where-Object { $mods -notmatch "(?i)(^|\s)$_(\s|$)" })
+$ExtChanged = $false
+if ($missing.Count -gt 0) {
+    if (-not (Test-Path $PhpIni)) { Fail "php.ini tidak ditemukan di $PhpIni. Pasang ulang XAMPP." }
+    try {
+        $enc = [Text.Encoding]::GetEncoding(28591)
+        $ini = [IO.File]::ReadAllText($PhpIni, $enc)
+        if (-not (Test-Path "$PhpIni.bisaclip-bak")) { Copy-Item $PhpIni "$PhpIni.bisaclip-bak" }
+        foreach ($x in $missing) {
+            $re = "(?im)^[ \t]*;[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$"
+            if ($ini -match $re) { $ini = [regex]::Replace($ini, $re, "extension=$x", 1) }
+            elseif ($ini -notmatch "(?im)^[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$") { $ini = $ini.TrimEnd() + "`r`nextension=$x`r`n" }
+        }
+        [IO.File]::WriteAllText($PhpIni, $ini, $enc)
+        $ExtChanged = $true
+    } catch {
+        Fail "Tidak bisa mengubah $PhpIni ($($_.Exception.Message)). Klik kanan Install BisaClip.bat -> Run as administrator, atau buka php.ini, hapus tanda ; di depan extension=$($missing -join ', extension='), lalu restart Apache."
+    }
+    $mods = (& $Php -m) -join ' '
+    foreach ($x in $missing) {
+        if ($mods -match "(?i)(^|\s)$x(\s|$)") { Ok "Ekstensi PHP $x dinyalakan" }
+        else { Warn "Ekstensi PHP $x masih belum aktif (file php_$x.dll tidak ada di folder ext XAMPP?). Pasang ulang XAMPP versi terbaru." }
+    }
+} else { Ok ('Ekstensi PHP: ' + ($Exts -join ', ')) }
 if (-not $m.Success) { Warn "Folder aplikasi sebaiknya di dalam C:\xampp\htdocs supaya bisa dibuka lewat http://localhost/..." }
 
 # ---------- 2. Git Bash (dipakai untuk menjalankan semua perintah ffmpeg/python) ----------
@@ -249,8 +273,22 @@ Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 
 $up = $false
 try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 $url; $up = $true } catch { }
+if ($up -and -not $ExtChanged) {
+    # Cek PHP yang dipakai Apache (bisa memakai php.ini lain dari PHP CLI)
+    try {
+        $h = Invoke-RestMethod -UseBasicParsing -TimeoutSec 5 ($url + 'api.php?action=health')
+        if ($h.missing.Count -gt 0) {
+            Warn "Apache: ekstensi PHP belum aktif: $($h.missing -join ', '). Buka $($h.ini), hapus tanda ; di depan extension=..., lalu restart Apache."
+        } else { Ok "Apache PHP $($h.php): ekstensi lengkap" }
+    } catch { }
+}
 Write-Host ''
-if ($up) {
+if ($ExtChanged) {
+    Write-Host '  PENTING: pengaturan PHP diubah. Restart Apache supaya aktif:' -ForegroundColor Yellow
+    Write-Host '    XAMPP Control Panel -> baris Apache -> klik Stop, lalu Start.' -ForegroundColor Yellow
+    Write-Host ''
+}
+if ($up -and -not $ExtChanged) {
     Write-Host "  Selesai! Buka $url" -ForegroundColor Green
     Start-Process $url
 } else {
