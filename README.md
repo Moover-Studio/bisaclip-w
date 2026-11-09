@@ -104,7 +104,7 @@ cd C:\xampp\htdocs\bisaclip-w
 | Masalah | Solusi |
 |---|---|
 | `localhost/bisaclip-w` tidak terbuka | Apache belum jalan. Buka XAMPP Control Panel, lalu **Start** Apache. Kalau port 80 bentrok (Skype/IIS), matikan aplikasi itu. |
-| "Ekstensi PHP curl belum aktif" | Jalankan **Install BisaClip.bat** lagi (ekstensi dinyalakan otomatis), lalu **Stop** dan **Start** Apache. Manual: buka `C:\xampp\php\php.ini`, hapus `;` di depan `extension=curl`, lalu restart Apache. |
+| "Ekstensi PHP curl belum aktif" | Jalankan **Install BisaClip.bat** lagi (ekstensi dinyalakan otomatis), lalu **Stop** dan **Start** Apache. Kalau `php.ini` tidak ada (hanya `php.ini-development`), installer membuatnya otomatis. |
 | Proses gagal dengan pesan "bash" / "Git" | Git for Windows belum terpasang. Pasang Git, lalu jalankan installer lagi. |
 | Download YouTube mulai gagal | Jalankan **Install BisaClip.bat** lagi (yt-dlp diperbarui). |
 | Render lambat / cek sistem menulis "encoder software" | Normal tanpa GPU NVIDIA. Kalau punya NVIDIA, perbarui drivernya lalu jalankan installer lagi. |

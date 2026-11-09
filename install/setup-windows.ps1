@@ -44,33 +44,55 @@ if (-not $Php) { Fail 'XAMPP belum terpasang. Pasang XAMPP for Windows (apachefr
 $phpVer = (& $Php -r 'echo PHP_VERSION;')
 if ([version]($phpVer -replace '[^0-9.].*$', '') -lt [version]'8.1') { Fail "PHP $phpVer terlalu lama. Pasang XAMPP versi terbaru (PHP 8.2 ke atas)." }
 Ok "PHP $phpVer ($Php)"
-# Ekstensi PHP yang dipakai BisaClip. Yang belum aktif dinyalakan otomatis di php.ini (cadangan: php.ini.bisaclip-bak).
+# Ekstensi PHP yang dipakai BisaClip. php.ini disiapkan otomatis (cadangan: php.ini.bisaclip-bak):
+# - XAMPP tertentu (versi zip / setup belum selesai) TIDAK punya php.ini, hanya php.ini-development & -production,
+#   sehingga PHP jalan tanpa ekstensi apa pun (curl, mbstring, ...). Dibuat dari php.ini-development.
+# - extension_dir diarahkan ke folder ext XAMPP, ekstensi yang dibutuhkan dinyalakan.
 $Exts = @('curl', 'mbstring', 'openssl', 'fileinfo', 'gd')
-$PhpIni = Join-Path (Split-Path $Php) 'php.ini'
+$PhpDir = Split-Path $Php
+$PhpIni = Join-Path $PhpDir 'php.ini'
+$ExtDir = Join-Path $PhpDir 'ext'
 $mods = (& $Php -m) -join ' '
 $missing = @($Exts | Where-Object { $mods -notmatch "(?i)(^|\s)$_(\s|$)" })
 $ExtChanged = $false
-if ($missing.Count -gt 0) {
-    if (-not (Test-Path $PhpIni)) { Fail "php.ini tidak ditemukan di $PhpIni. Pasang ulang XAMPP." }
+if ($missing.Count -gt 0 -or -not (Test-Path $PhpIni)) {
     try {
         $enc = [Text.Encoding]::GetEncoding(28591)
-        $ini = [IO.File]::ReadAllText($PhpIni, $enc)
-        if (-not (Test-Path "$PhpIni.bisaclip-bak")) { Copy-Item $PhpIni "$PhpIni.bisaclip-bak" }
-        foreach ($x in $missing) {
-            $re = "(?im)^[ \t]*;[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$"
-            if ($ini -match $re) { $ini = [regex]::Replace($ini, $re, "extension=$x", 1) }
-            elseif ($ini -notmatch "(?im)^[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$") { $ini = $ini.TrimEnd() + "`r`nextension=$x`r`n" }
+        if (Test-Path $PhpIni) {
+            $ini = [IO.File]::ReadAllText($PhpIni, $enc)
+            if (-not (Test-Path "$PhpIni.bisaclip-bak")) { Copy-Item $PhpIni "$PhpIni.bisaclip-bak" }
+        } else {
+            $tpl = @("$PhpDir\php.ini-development", "$PhpDir\php.ini-production") | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($tpl) { $ini = [IO.File]::ReadAllText($tpl, $enc); Ok "php.ini dibuat dari $(Split-Path $tpl -Leaf)" }
+            else { $ini = "[PHP]`r`n"; Ok 'php.ini dibuat' }
+            # Bawaan php.ini-development kurang pas untuk aplikasi lokal: atur yang penting
+            $ini = $ini.TrimEnd() + "`r`n`r`n; --- BisaClip ---`r`nmemory_limit=1024M`r`nupload_max_filesize=4G`r`npost_max_size=4G`r`nmax_execution_time=0`r`ndate.timezone=Asia/Jakarta`r`n"
+        }
+        # extension_dir harus menunjuk folder ext XAMPP (bawaan PHP Windows: C:\php\ext, salah)
+        $edLine = "extension_dir=`"$ExtDir`""
+        $reEd = '(?im)^[ \t]*;?[ \t]*extension_dir[ \t]*=[ \t]*"?ext"?[ \t]*$'
+        if ($ini -match '(?im)^[ \t]*extension_dir[ \t]*=') {
+            $cur = [regex]::Match($ini, '(?im)^[ \t]*extension_dir[ \t]*=[ \t]*"?([^"\r\n]*)"?').Groups[1].Value.Trim()
+            $abs = if ([IO.Path]::IsPathRooted($cur)) { $cur } else { Join-Path $PhpDir $cur }
+            if (-not (Test-Path "$abs\php_curl.dll")) { $ini = [regex]::Replace($ini, '(?im)^[ \t]*extension_dir[ \t]*=.*$', $edLine.Replace('$', '$$'), 1) }
+        } elseif ($ini -match $reEd) { $ini = [regex]::Replace($ini, $reEd, $edLine.Replace('$', '$$'), 1) }
+        else { $ini = $ini.TrimEnd() + "`r`n$edLine`r`n" }
+        foreach ($x in $Exts) {
+            $on = "(?im)^[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$"
+            $off = "(?im)^[ \t]*;[ \t]*extension[ \t]*=[ \t]*`"?(php_)?$x(\.dll)?`"?[ \t]*$"
+            if ($ini -match $on) { continue }
+            if ($ini -match $off) { $ini = [regex]::Replace($ini, $off, "extension=$x", 1) }
+            else { $ini = $ini.TrimEnd() + "`r`nextension=$x`r`n" }
         }
         [IO.File]::WriteAllText($PhpIni, $ini, $enc)
         $ExtChanged = $true
     } catch {
-        Fail "Tidak bisa mengubah $PhpIni ($($_.Exception.Message)). Klik kanan Install BisaClip.bat -> Run as administrator, atau buka php.ini, hapus tanda ; di depan extension=$($missing -join ', extension='), lalu restart Apache."
+        Fail "Tidak bisa menulis $PhpIni ($($_.Exception.Message)). Klik kanan Install BisaClip.bat -> Run as administrator."
     }
     $mods = (& $Php -m) -join ' '
-    foreach ($x in $missing) {
-        if ($mods -match "(?i)(^|\s)$x(\s|$)") { Ok "Ekstensi PHP $x dinyalakan" }
-        else { Warn "Ekstensi PHP $x masih belum aktif (file php_$x.dll tidak ada di folder ext XAMPP?). Pasang ulang XAMPP versi terbaru." }
-    }
+    $still = @($Exts | Where-Object { $mods -notmatch "(?i)(^|\s)$_(\s|$)" })
+    if ($still.Count -eq 0) { Ok ('Ekstensi PHP aktif: ' + ($Exts -join ', ')) }
+    else { Warn "Ekstensi PHP masih belum aktif: $($still -join ', ') (file php_*.dll tidak ada di $ExtDir?). Pasang ulang XAMPP versi terbaru." }
 } else { Ok ('Ekstensi PHP: ' + ($Exts -join ', ')) }
 if (-not $m.Success) { Warn "Folder aplikasi sebaiknya di dalam C:\xampp\htdocs supaya bisa dibuka lewat http://localhost/..." }
 
